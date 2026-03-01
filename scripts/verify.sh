@@ -148,9 +148,12 @@ for marker in (
         raise SystemExit(f"docker-compose.yml missing contract marker: {marker}")
 
 for marker in (
-    "location /ws",
+    "location = /dev/ws",
     "proxy_set_header Upgrade $http_upgrade;",
     'proxy_set_header Connection "upgrade";',
+    'proxy_pass http://$beads_ui_upstream/ws;',
+    'sub_filter \'"/ws"\' \'"/dev/ws"\';',
+    'sub_filter "\'/ws\'" "\'/dev/ws\'";',
 ):
     if marker not in nginx_text:
         raise SystemExit(f"nginx/default.conf missing websocket marker: {marker}")
