@@ -1,7 +1,8 @@
-.PHONY: help verify-fast verify verify-ci lint-static lint-hygiene lint-contract test-unit
+.PHONY: help beads-init verify-fast verify verify-ci lint-static lint-hygiene lint-contract test-unit
 
 help:
 	@printf '%s\n' \
+		'beads-init     attach this checkout to the shared Beads backend and seed workflow files' \
 		'verify-fast    quick local demo contour' \
 		'verify         full local demo contour before handoff or review' \
 		'verify-ci      CI-grade alias (currently mirrors verify)' \
@@ -9,6 +10,9 @@ help:
 		'lint-hygiene   placeholder marker checks' \
 		'lint-contract  fixed runtime contract checks' \
 		'test-unit      focused stdlib unit tests'
+
+beads-init:
+	@sh ./scripts/beads_shared_init.sh
 
 verify-fast: lint-static lint-hygiene test-unit
 

@@ -7,7 +7,7 @@
       "id": "plan",
       "title": "Plan",
       "type": "agent",
-      "prompt": "Analyze the request. Produce a concrete plan and list any clarifying questions. If questions are required, set outcome=needs_human."
+      "prompt": "Run `make beads-init` to attach this checkout to the shared Beads backend, then run `bd prime` to load the repo workflow. Analyze the request and produce a concrete plan. Put clarifying questions in this Change Request via `bd comments add`. If questions are required, set outcome=needs_human."
     },
     {
       "id": "plan_approval",
@@ -21,14 +21,14 @@
       "title": "Implement",
       "type": "agent",
       "depends_on": ["plan_approval"],
-      "prompt": "Implement the approved plan. Create/push a branch and open a PR. Link the PR URL back into the Change Request."
+      "prompt": "Run `bd mol current` to confirm the active step, implement the approved plan, run `make verify-fast` after each small slice and `make verify` before completion, then create/push a branch and open a PR. Link the PR URL and verification results back into the Change Request with `bd comments add`."
     },
     {
       "id": "review",
       "title": "Agent review",
       "type": "agent",
       "depends_on": ["implement"],
-      "prompt": "Run Codex in reviewer mode against the diff. Record an explicit decision and create separate Beads tasks for any findings."
+      "prompt": "Run Codex in reviewer mode against the diff. Record an explicit decision in the Change Request. Create separate Beads tasks only for actionable findings."
     },
     {
       "id": "ci",
@@ -49,14 +49,14 @@
       "title": "Merge",
       "type": "agent",
       "depends_on": ["merge_approval"],
-      "prompt": "Merge the PR (no auto-merge without this gate)."
+      "prompt": "Reconfirm that `merge_approval` is satisfied, merge the PR (no auto-merge without this gate), and post the merge result in the Change Request."
     },
     {
       "id": "deploy",
       "title": "Deploy",
       "type": "agent",
       "depends_on": ["merge"],
-      "prompt": "Deploy the change to the demo host and post the URL."
+      "prompt": "Deploy the change to the demo host, post the URL, and capture any notes the human needs for acceptance."
     },
     {
       "id": "acceptance",

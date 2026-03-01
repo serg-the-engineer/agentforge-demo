@@ -59,24 +59,50 @@ services:
       retries: 5
     restart: unless-stopped
 
+  beads-dolt:
+    image: dolthub/dolt-sql-server:latest
+    command:
+      - dolt
+      - sql-server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "3306"
+      - --data-dir
+      - /var/lib/dolt
+    environment:
+      DOLT_ROOT_HOST: "%"
+      DOLT_ROOT_PASSWORD: ${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}
+    expose:
+      - "3306"
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - ./.beads-host/dolt:/var/lib/dolt
+    restart: unless-stopped
+
   beads-ui:
     image: ghcr.io/mantoni/beads-ui:latest
     working_dir: /workspace
+    environment:
+      BEADS_DOLT_PASSWORD: ${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}
     command:
       - sh
       - -lc
       - |
-        bd init --gitignore >/dev/null 2>&1 || true
-        mkdir -p .beads/formulas
-        cp -f /seed/AGENTS.md /workspace/AGENTS.md
-        cp -f /seed/formulas/mol-change-request.formula.json .beads/formulas/mol-change-request.formula.json
+        set -eu
+        BEADS_SHARED_HOST=beads-dolt \
+        BEADS_SHARED_PORT=3306 \
+        BEADS_INIT_ATTEMPTS=30 \
+        sh ./scripts/beads_shared_init.sh
         exec bdui --host 0.0.0.0 --port 8080
     expose:
       - "8080"
     volumes:
-      - demo-agentforge-beads-data:/workspace
-      - ./AGENTS.md:/seed/AGENTS.md:ro
-      - ./beads/formulas:/seed/formulas:ro
+      - .:/workspace
+    depends_on:
+      beads-dolt:
+        condition: service_started
     restart: unless-stopped
 
   web:
@@ -112,4 +138,3 @@ networks:
 volumes:
   demo-agentforge-postgres-data:
   demo-agentforge-redis-data:
-  demo-agentforge-beads-data:

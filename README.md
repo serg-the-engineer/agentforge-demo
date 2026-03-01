@@ -8,6 +8,7 @@ The runtime topology is fixed:
 
 - `web`: `nginx`, listens on `8081`, serves static files and proxies `/api/`
 - `api`: tiny Python API, listens on `9001`
+- `beads-dolt`: shared Beads Dolt backend, listens on `3306` internally and binds `127.0.0.1:3307` on the host
 - `beads-ui`: Beads task UI, listens on `8080` internally and is proxied via `web`
 - `db`: Postgres, listens on `5433`
 - `redis`: auxiliary Redis instance, listens on `6380`
@@ -29,12 +30,13 @@ The compose file is intentionally frozen. Future demo work should change applica
 The contract is:
 
 - there is exactly one compose file: `docker-compose.yml`
-- service names stay `web`, `api`, `db`, `redis`, and `beads-ui`
-- `web` is the only ingress-facing service
+- service names stay `web`, `api`, `db`, `redis`, `beads-dolt`, and `beads-ui`
+- `web` is the only public ingress-facing service
 - `api`, `beads-ui`, `db`, and `redis` stay internal-only
+- `beads-dolt` binds loopback-only on the host for agent access (`127.0.0.1:3307`)
 - `web` keeps the external network alias `demo-agentforge-web`
-- the demo compose does not publish host ports
-- internal ports stay offset from defaults: `8081`, `9001`, `8080`, `5433`, `6380`
+- `beads-ui` bind-mounts the project checkout so it shares the repository fingerprint with host-side agent checkouts
+- internal ports stay offset from defaults: `8081`, `9001`, `3306`, `8080`, `5433`, `6380`
 
 This is what keeps the main AgentForge compose unchanged while the demo evolves.
 
@@ -80,10 +82,15 @@ That applies to both the game UI and the Beads UI mounted at `/dev/tasks`.
 
 The demo now ships with a Beads-first task workspace for human approvals and handoffs.
 
-- The workspace seeds `AGENTS.md` into the Beads data volume on first start.
-- The `mol-change-request` formula is copied from `examples/beads/formulas/mol-change-request.formula.json`.
+- `beads-dolt` is now the shared Beads backend. It keeps its state in `./.beads-host/dolt` on the host and binds `127.0.0.1:3307` for host-local clients.
+- `beads-ui` now runs against the project checkout itself, so the UI and host-side agent checkouts use the same repo fingerprint and the same shared backend.
+- Run `make beads-init` once per local checkout to attach that checkout to the shared backend and seed the same `beads/PRIME.md` and `mol-change-request` files for local CLI use.
+- If you are on another machine, open `ssh -N -L 3307:127.0.0.1:3307 <demo-host>` first, then run `make beads-init`.
+- Run `bd prime` at the start of each agent session; this repo overrides the default Beads primer with `beads/PRIME.md`.
 - Open the Beads UI at `https://demo.agentforge.redmadrobot.com/dev/tasks` after deploy.
 - Start a new workflow with `bd mol pour mol-change-request`.
+- For ad-hoc work, run `bd ready` before claiming a task. Inside an active Change Request, run `bd mol current`, then `bd update <id> --status in_progress` when a step starts, `bd comments add <id> "..."` for verification and handoff notes, and `bd close <id>` after green verification.
+- Because every client writes directly to the same Dolt backend, status changes appear in Beads UI as soon as the `bd` command succeeds. `bd sync` is not required for live UI updates.
 
 ## Local Delivery Workflow
 
@@ -99,6 +106,7 @@ This demo follows the same delivery discipline as the main repository, adapted t
 
 The demo now exposes stable verification entrypoints in its local `Makefile`:
 
+- `make beads-init`: attach the current checkout to the shared Beads backend and seed the demo workflow files,
 - `make verify-fast`: quick local contour for small iterations,
 - `make verify`: full local contour before review or merge,
 - `make verify-ci`: CI-grade alias with the same blocking semantics,
@@ -129,10 +137,12 @@ Then deploy the demo independently:
 
 ```bash
 cd demo-agentforge
+export BEADS_DOLT_PASSWORD=demo-agentforge-beads
 docker compose up --build -d
 ```
 
-The first start also initializes the Beads workspace used by `beads-ui`.
+The first start now also creates `./.beads-host/dolt` for the shared Beads backend and attaches `beads-ui` to it through the project checkout.
+Host-side agents can connect directly with `make beads-init`. Remote agents should use an SSH tunnel to `127.0.0.1:3307` first.
 
 ## CI/CD Contract
 

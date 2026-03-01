@@ -21,6 +21,7 @@ for rel_path in ("api/server.py", "tests/test_api_server.py"):
     ast.parse(path.read_text(encoding="utf-8"), filename=rel_path)
 
 for rel_path in (
+    ".gitignore",
     "site/index.html",
     "site/assets/game.js",
     "site/assets/styles.css",
@@ -30,6 +31,9 @@ for rel_path in (
     "AGENTS.md",
     "README.md",
     "Makefile",
+    "scripts/beads_shared_init.sh",
+    "beads/PRIME.md",
+    "beads/formulas/mol-change-request.formula.json",
 ):
     if not Path(rel_path).is_file():
         raise SystemExit(f"missing required file: {rel_path}")
@@ -88,6 +92,12 @@ version_payload = json.loads(Path("site/version.json").read_text(encoding="utf-8
 html_text = Path("site/index.html").read_text(encoding="utf-8")
 game_text = Path("site/assets/game.js").read_text(encoding="utf-8")
 compose_text = Path("docker-compose.yml").read_text(encoding="utf-8")
+agents_text = Path("AGENTS.md").read_text(encoding="utf-8")
+readme_text = Path("README.md").read_text(encoding="utf-8")
+makefile_text = Path("Makefile").read_text(encoding="utf-8")
+formula_text = Path("beads/formulas/mol-change-request.formula.json").read_text(
+    encoding="utf-8"
+)
 
 match = re.search(r'data-app-version="([^"]+)"', html_text)
 if not match:
@@ -113,15 +123,57 @@ for marker in (
     "\n  api:\n",
     "\n  db:\n",
     "\n  redis:\n",
+    "\n  beads-dolt:\n",
     "\n  beads-ui:\n",
     'demo-agentforge-web',
     '"8081"',
     '"9001"',
+    '"3306"',
     '"5433"',
     '"6380"',
+    '"127.0.0.1:3307:3306"',
+    'dolthub/dolt-sql-server:latest',
+    'sh ./scripts/beads_shared_init.sh',
 ):
     if marker not in compose_text:
         raise SystemExit(f"docker-compose.yml missing contract marker: {marker}")
+
+for marker in (
+    "<!-- BEGIN BEADS INTEGRATION -->",
+    "`make beads-init`",
+    "`bd prime`",
+    "`bd ready`",
+):
+    if marker not in agents_text:
+        raise SystemExit(f"AGENTS.md missing Beads workflow marker: {marker}")
+
+for marker in (
+    "make beads-init",
+    "beads/PRIME.md",
+    "bd prime",
+):
+    if marker not in readme_text:
+        raise SystemExit(f"README.md missing Beads workflow marker: {marker}")
+
+if "\nbeads-init:\n" not in makefile_text:
+    raise SystemExit("Makefile must expose a beads-init target")
+
+gitignore_text = Path(".gitignore").read_text(encoding="utf-8")
+if ".beads/" not in gitignore_text:
+    raise SystemExit(".gitignore must keep .beads/ out of version control")
+if ".beads-host/" not in gitignore_text:
+    raise SystemExit(".gitignore must keep .beads-host/ out of version control")
+
+for marker in (
+    "`make beads-init`",
+    "`bd prime`",
+    "`make verify-fast`",
+    "`make verify`",
+):
+    if marker not in formula_text:
+        raise SystemExit(
+            f"beads/formulas/mol-change-request.formula.json missing marker: {marker}"
+        )
 PY
 }
 
