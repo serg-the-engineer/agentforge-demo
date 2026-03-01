@@ -1,7 +1,7 @@
 {
   "formula": "mol-change-request",
   "title": "Change Request",
-  "description": "Beads-first CR workflow: plan -> implement -> review -> CI -> merge -> deploy -> acceptance",
+  "description": "Beads-first CR workflow: plan -> plan_approval -> implement -> review -> review_approval -> ci -> merge -> deploy -> acceptance",
   "steps": [
     {
       "id": "plan",
@@ -28,28 +28,28 @@
       "title": "Agent review",
       "type": "agent",
       "depends_on": ["implement"],
-      "prompt": "Run Codex in reviewer mode against the diff. Record an explicit decision in the Change Request. Create separate Beads tasks only for actionable findings."
+      "prompt": "Run Codex in reviewer mode against the diff. Record an explicit decision in the Change Request and summarize open risks. Create separate Beads tasks only for actionable findings, then hand off to `review_approval`."
+    },
+    {
+      "id": "review_approval",
+      "title": "Approve review",
+      "type": "human",
+      "depends_on": ["review"],
+      "gate": { "type": "human" }
     },
     {
       "id": "ci",
       "title": "Wait for CI",
       "type": "gate",
-      "depends_on": ["review"],
+      "depends_on": ["review_approval"],
       "gate": { "type": "gh:run" }
-    },
-    {
-      "id": "merge_approval",
-      "title": "Approve merge",
-      "type": "human",
-      "depends_on": ["ci"],
-      "gate": { "type": "human" }
     },
     {
       "id": "merge",
       "title": "Merge",
       "type": "agent",
-      "depends_on": ["merge_approval"],
-      "prompt": "Reconfirm that `merge_approval` is satisfied, merge the PR (no auto-merge without this gate), and post the merge result in the Change Request."
+      "depends_on": ["review_approval", "ci"],
+      "prompt": "Reconfirm that `review_approval` is closed in Beads by a human, then merge the PR and post the merge result in the Change Request. Treat this as the code-review approval gate in Beads, without requiring a GitHub PR review approval."
     },
     {
       "id": "deploy",

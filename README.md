@@ -90,6 +90,8 @@ The demo now ships with a Beads-first task workspace for human approvals and han
 - Run `bd prime` at the start of each agent session; this repo overrides the default Beads primer with `beads/PRIME.md`.
 - Open the Beads UI at `https://demo.agentforge.redmadrobot.com/dev/tasks` after deploy.
 - Start a new workflow with `bd mol pour mol-change-request`.
+- The canonical Change Request path is `plan -> plan_approval -> implement -> review -> review_approval -> ci -> merge -> deploy -> acceptance`.
+- For code review, `review_approval` is the human gate in Beads: review approval is recorded by humans in Beads and does not require a GitHub PR review approval.
 - For ad-hoc work, run `bd ready` before claiming a task. Inside an active Change Request, run `bd mol current`, then `bd update <id> --status in_progress` when a step starts, `bd comments add <id> "..."` for verification and handoff notes, and `bd close <id>` after green verification.
 - Because every client writes directly to the same Dolt backend, status changes appear in Beads UI as soon as the `bd` command succeeds. `bd sync` is not required for live UI updates.
 
@@ -99,7 +101,7 @@ This demo follows the same delivery discipline as the main repository, adapted t
 
 - use TDD for behavior changes by adding or updating the narrowest automated check before implementation,
 - run `make verify-fast` after each small implementation slice,
-- run `make verify` before handoff, review, or merge approval,
+- run `make verify` before handoff, review, or `review_approval`,
 - use `make verify-ci` as the CI-grade alias; it currently mirrors `make verify` until the demo moves into its own repository,
 - keep changes small and single-purpose so they can be reviewed in one pass.
 
@@ -109,7 +111,7 @@ The demo now exposes stable verification entrypoints in its local `Makefile`:
 
 - `make beads-init`: attach the current checkout to the shared Beads backend and seed the demo workflow files,
 - `make verify-fast`: quick local contour for small iterations,
-- `make verify`: full local contour before review or merge,
+- `make verify`: full local contour before review or `review_approval`,
 - `make verify-ci`: CI-grade alias with the same blocking semantics,
 - `make lint-static`: syntax and required-file checks for the Python API and static assets,
 - `make lint-hygiene`: blocks placeholder markers and unfinished notes,

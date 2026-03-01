@@ -10,15 +10,16 @@
 ## Change Request Flow
 
 - Start new work with `bd mol pour mol-change-request`.
-- Respect the fixed flow: `plan -> plan_approval -> implement -> review -> ci -> merge_approval -> merge -> deploy -> acceptance`.
-- Do not bypass `plan_approval`, `merge_approval`, or `acceptance`.
+- Respect the fixed flow: `plan -> plan_approval -> implement -> review -> review_approval -> ci -> merge -> deploy -> acceptance`.
+- Do not bypass `plan_approval`, `review_approval`, or `acceptance`.
+- `review_approval` is a human Beads gate: code-review approval is captured by Beads status, not GitHub PR review approval.
 
 ## Step Rules
 
 - When an agent starts a bead, run `bd update <id> --status in_progress` and post the current plan or status in the Change Request.
 - Use `bd comments add <id> "..."` for verification output, blockers, and handoff notes.
 - Run `make verify-fast` after each small implementation slice.
-- Run `make verify` before closing `implement`, before handoff to review, and before asking for merge approval.
+- Run `make verify` before closing `implement`, before handoff to review, and before asking for `review_approval`.
 - If you discover new work, create a separate issue with `bd create "..." --type task --priority 2` and connect blockers with `bd dep add <blocked-id> <blocking-id>`.
 - In `review`, create separate Beads tasks only for actionable defects.
 - The shared backend is live, so UI updates happen as soon as `bd update`, `bd comments add`, or `bd close` succeeds.

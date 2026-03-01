@@ -62,12 +62,6 @@ services:
   beads-dolt:
     image: dolthub/dolt-sql-server:latest
     command:
-      - dolt
-      - sql-server
-      - --host
-      - 0.0.0.0
-      - --port
-      - "3306"
       - --data-dir
       - /var/lib/dolt
     environment:
@@ -97,7 +91,7 @@ services:
         BEADS_SHARED_PORT=3306 \
         BEADS_INIT_ATTEMPTS=30 \
         sh ./scripts/beads_shared_init.sh
-        exec bdui --host 0.0.0.0 --port 8080
+        exec node /usr/local/lib/node_modules/beads-ui/server/index.js --host 0.0.0.0 --port 8080
     expose:
       - "8080"
     volumes:

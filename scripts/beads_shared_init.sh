@@ -8,56 +8,84 @@ attempts="${BEADS_INIT_ATTEMPTS:-1}"
 
 export BEADS_DOLT_PASSWORD="${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}"
 
-need_init=1
-
-if bd backend show >/dev/null 2>&1; then
-	backend="$(bd backend show 2>/dev/null | sed -n 's/^Current backend: //p')"
-
-	if [ "$backend" = "dolt" ]; then
-		need_init=0
-	elif [ "$backend" = "sqlite" ]; then
-		count="$(bd count 2>/dev/null | tr -d '[:space:]')"
-
-		if [ "${count:-0}" != "0" ]; then
-			echo "refusing to replace a local sqlite beads database that still contains issues" >&2
-			echo "clear or migrate .beads first if you need to reattach this checkout" >&2
-			exit 1
-		fi
-	fi
+if ! command -v bd >/dev/null 2>&1; then
+	echo "bd command is not available in this environment" >&2
+	exit 1
 fi
 
-if [ "$need_init" = "1" ]; then
-	attempt=1
+legacy_cli=0
+if bd init --help 2>/dev/null | grep -q -- '--backend'; then
+	legacy_cli=1
+fi
 
-	while :; do
-		if bd init --force --backend dolt --server \
+if command -v git >/dev/null 2>&1; then
+	if [ ! -d .git ]; then
+		git init -q >/dev/null 2>&1 || true
+	fi
+elif [ "$legacy_cli" = "0" ]; then
+	echo "git is required for bd init with this beads CLI version" >&2
+	exit 1
+fi
+
+run_bd_init() {
+	if [ "$legacy_cli" = "1" ]; then
+		bd init --force --backend dolt --server \
 			--server-host "$host" \
 			--server-port "$port" \
 			--server-user "$user" \
 			--skip-hooks \
-			--skip-merge-driver >/dev/null 2>&1; then
-			break
+			--skip-merge-driver
+	else
+		bd init --force --server \
+			--server-host "$host" \
+			--server-port "$port" \
+			--server-user "$user" \
+			--skip-hooks
+	fi
+}
+
+attempt=1
+while :; do
+	if run_bd_init >/dev/null 2>&1; then
+		break
+	fi
+
+	if [ "$attempt" -ge "$attempts" ]; then
+		echo "unable to attach this checkout to the shared Beads backend at $host:$port" >&2
+
+		if [ "$host" = "127.0.0.1" ] || [ "$host" = "localhost" ]; then
+			echo "if you are off-host, open an SSH tunnel to 127.0.0.1:$port on the demo host first" >&2
+		else
+			echo "check that the shared Beads backend service is reachable from this environment" >&2
 		fi
 
-		if [ "$attempt" -ge "$attempts" ]; then
-			echo "unable to attach this checkout to the shared Beads backend at $host:$port" >&2
+		set +e
+		run_bd_init
+		status=$?
+		set -e
+		exit "$status"
+	fi
 
-			if [ "$host" = "127.0.0.1" ] || [ "$host" = "localhost" ]; then
-				echo "if you are off-host, open an SSH tunnel to 127.0.0.1:$port on the demo host first" >&2
-			else
-				echo "check that the shared Beads backend service is reachable from this environment" >&2
-			fi
-
-			exit 1
-		fi
-
-		attempt=$((attempt + 1))
-		sleep 1
-	done
-fi
+	attempt=$((attempt + 1))
+	sleep 1
+done
 
 mkdir -p .beads/formulas
 cp -f beads/PRIME.md .beads/PRIME.md
 cp -f beads/formulas/mol-change-request.formula.json .beads/formulas/mol-change-request.formula.json
+
+current_custom_types="$(bd config get types.custom 2>/dev/null || true)"
+normalized_custom_types="$(printf '%s' "$current_custom_types" | tr -d '[:space:]')"
+
+case ",$normalized_custom_types," in
+	*,gate,*)
+		;;
+	",,")
+		bd config set types.custom gate >/dev/null
+		;;
+	*)
+		bd config set types.custom "${normalized_custom_types},gate" >/dev/null
+		;;
+esac
 
 bd formula list >/dev/null

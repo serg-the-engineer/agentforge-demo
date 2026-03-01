@@ -20,8 +20,9 @@
 
 - The demo workspace ships the `mol-change-request` formula versioned in `beads/formulas/`.
 - Create a new Change Request with `bd mol pour mol-change-request`.
-- Follow the canonical path: `plan -> plan_approval -> implement -> review -> ci -> merge_approval -> merge -> deploy -> acceptance`.
-- Do not bypass `plan_approval`, `merge_approval`, or `acceptance`.
+- Follow the canonical path: `plan -> plan_approval -> implement -> review -> review_approval -> ci -> merge -> deploy -> acceptance`.
+- Do not bypass `plan_approval`, `review_approval`, or `acceptance`.
+- The `review_approval` checkpoint is human-owned in Beads: review approval is a Beads status gate, not a GitHub PR review approval.
 - If the sequence or gate semantics change, update this file, `README.md`, and the seeded formula in the same change set.
 
 ## Architecture and Change Control
@@ -36,7 +37,7 @@
 - Start each session by making sure `make beads-init` has already been run for this checkout, then run `bd prime`. After that, use `bd mol current` or `bd ready` to confirm the active unblocked step before you claim work.
 - If you are not on the demo host, open an SSH tunnel to the host-local Beads backend first: `ssh -N -L 3307:127.0.0.1:3307 <demo-host>`, then run `make beads-init`.
 - Agents should publish handoff summaries, verification results, questions, and links back into the active Change Request.
-- Run `make verify-fast` after each small implementation slice. Run `make verify` before handoff, review, or merge approval, then post the result in the active Change Request with `bd comments add <id> ...`.
+- Run `make verify-fast` after each small implementation slice. Run `make verify` before handoff, review, or `review_approval`, then post the result in the active Change Request with `bd comments add <id> ...`.
 - If the next step requires a human, record the blocking questions in the current gate instead of opening a side channel.
 - When new follow-up work is discovered, create a separate Beads task with `bd create` and connect blockers with `bd dep add`.
 - Review findings should become separate Beads tasks only when the review step explicitly identifies actionable defects.
@@ -47,9 +48,9 @@
 When ending a work session, finish the repo-specific closeout before handing off.
 
 - File or update Beads tasks for any remaining follow-up work instead of leaving loose notes.
-- Run the applicable quality gate: `make verify-fast` for an incremental slice, `make verify` before handoff, review, or merge approval.
+- Run the applicable quality gate: `make verify-fast` for an incremental slice, `make verify` before handoff, review, or `review_approval`.
 - Update the current bead status, add the handoff note with `bd comments add <id> ...`, and close finished work with `bd close <id>` when appropriate.
-- Do not push, merge, or mark work complete ahead of `plan_approval`, `merge_approval`, or `acceptance`.
+- Do not push, merge, or mark work complete ahead of `plan_approval`, `review_approval`, or `acceptance`.
 - Hand off with concrete verification status, blockers, and links inside the active Change Request.
 
 
@@ -79,7 +80,7 @@ bd mol pour mol-change-request
 ### Verification Rules
 
 - Run `make verify-fast` after each small implementation slice.
-- Run `make verify` before handoff, review, or merge approval.
-- Do not bypass `plan_approval`, `merge_approval`, or `acceptance`.
+- Run `make verify` before handoff, review, or `review_approval`.
+- Do not bypass `plan_approval`, `review_approval`, or `acceptance`.
 
 <!-- END BEADS INTEGRATION -->
