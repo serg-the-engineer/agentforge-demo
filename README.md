@@ -67,6 +67,7 @@ The main AgentForge ingress routes:
 Inside the demo stack, `web` additionally routes:
 
 - `/dev/tasks` -> `beads-ui:8080`
+- `/ws` -> `beads-ui:8080` for Beads UI websocket traffic
 
 The main AgentForge stack only needs that one stable upstream.
 

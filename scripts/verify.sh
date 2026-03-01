@@ -94,6 +94,7 @@ version_payload = json.loads(Path("site/version.json").read_text(encoding="utf-8
 html_text = Path("site/index.html").read_text(encoding="utf-8")
 game_text = Path("site/assets/game.js").read_text(encoding="utf-8")
 compose_text = Path("docker-compose.yml").read_text(encoding="utf-8")
+nginx_text = Path("nginx/default.conf").read_text(encoding="utf-8")
 beads_ui_dockerfile_text = Path("beads-ui/Dockerfile").read_text(encoding="utf-8")
 beads_init_text = Path("scripts/beads_shared_init.sh").read_text(encoding="utf-8")
 agents_text = Path("AGENTS.md").read_text(encoding="utf-8")
@@ -145,6 +146,14 @@ for marker in (
 ):
     if marker not in compose_text:
         raise SystemExit(f"docker-compose.yml missing contract marker: {marker}")
+
+for marker in (
+    "location /ws",
+    "proxy_set_header Upgrade $http_upgrade;",
+    'proxy_set_header Connection "upgrade";',
+):
+    if marker not in nginx_text:
+        raise SystemExit(f"nginx/default.conf missing websocket marker: {marker}")
 
 beads_dolt_match = re.search(
     r"\n  beads-dolt:\n(?P<body>.*?)(?:\n  [a-z0-9-]+:\n|\nnetworks:\n)",
