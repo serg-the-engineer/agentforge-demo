@@ -1,0 +1,69 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run validation
+        run: make verify-ci
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name != 'pull_request'
+    concurrency:
+      group: demo-agentforge-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ secrets.DEMO_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEMO_DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEMO_DEPLOY_PORT }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEMO_DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEMO_DEPLOY_KNOWN_HOSTS }}
+    steps:
+      - name: Validate deploy secrets
+        run: |
+          set -eu
+          for var in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [ -z "${!var}" ]; then
+              echo "Missing required secret: $var" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        run: |
+          set -eu
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/id_ed25519"
+
+      - name: Deploy on demo host
+        run: |
+          set -eu
+          ssh -p "${DEPLOY_PORT:-22}" -i "$HOME/.ssh/id_ed25519" "${DEPLOY_USER}@${DEPLOY_HOST}" <<'EOF'
+          set -eu
+          cd /srv/agentforge-demo
+          git fetch origin
+          git checkout main
+          git pull --ff-only origin main
+          export BEADS_DOLT_PASSWORD="${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}"
+          docker compose up --build -d
+          docker compose ps
+          EOF

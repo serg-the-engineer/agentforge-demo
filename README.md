@@ -147,6 +147,26 @@ Host-side agents can connect directly with `make beads-init`. Remote agents shou
 
 ## CI/CD Contract
 
+The repository now ships with GitHub Actions workflow `.github/workflows/cicd.yml`:
+
+- `validate` runs on `pull_request`, `push` to `main`, and `workflow_dispatch`, and executes `make verify-ci`
+- `deploy` runs only after successful `validate` and only for non-PR events, then deploys on the demo host
+- deployment command sequence on host:
+  1. `cd /srv/agentforge-demo`
+  2. `git fetch origin && git checkout main && git pull --ff-only origin main`
+  3. `docker compose up --build -d`
+
+Required repository secrets for deployment:
+
+- `DEMO_DEPLOY_HOST`
+- `DEMO_DEPLOY_USER`
+- `DEMO_DEPLOY_SSH_KEY` (private key for host access)
+- `DEMO_DEPLOY_KNOWN_HOSTS` (output of `ssh-keyscan -H <host>`)
+
+Optional:
+
+- `DEMO_DEPLOY_PORT` (defaults to `22`)
+
 When this demo is moved into its own public repository, its CI/CD can deploy it without knowing internal AgentForge details.
 
 The only shared infrastructure contract is:

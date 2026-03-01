@@ -22,6 +22,7 @@ for rel_path in ("api/server.py", "tests/test_api_server.py"):
 
 for rel_path in (
     ".gitignore",
+    ".github/workflows/cicd.yml",
     "site/index.html",
     "site/assets/game.js",
     "site/assets/styles.css",
@@ -100,6 +101,7 @@ makefile_text = Path("Makefile").read_text(encoding="utf-8")
 formula_text = Path("beads/formulas/mol-change-request.formula.json").read_text(
     encoding="utf-8"
 )
+workflow_text = Path(".github/workflows/cicd.yml").read_text(encoding="utf-8")
 
 match = re.search(r'data-app-version="([^"]+)"', html_text)
 if not match:
@@ -184,6 +186,18 @@ for marker in (
         raise SystemExit(
             f"beads/formulas/mol-change-request.formula.json missing marker: {marker}"
         )
+
+for marker in (
+    "name: CI/CD",
+    "validate:",
+    "deploy:",
+    "needs: validate",
+    "make verify-ci",
+    "/srv/agentforge-demo",
+    "docker compose up --build -d",
+):
+    if marker not in workflow_text:
+        raise SystemExit(f".github/workflows/cicd.yml missing marker: {marker}")
 PY
 }
 
