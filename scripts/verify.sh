@@ -152,6 +152,9 @@ for marker in (
     "proxy_set_header Upgrade $http_upgrade;",
     'proxy_set_header Connection "upgrade";',
     'proxy_pass http://$beads_ui_upstream/ws;',
+    'window.__beadsWsRewriteInstalled=true;',
+    'resolved.pathname==="/ws"',
+    'resolved.pathname="/dev/ws"',
     'sub_filter \'"/ws"\' \'"/dev/ws"\';',
     'sub_filter "\'/ws\'" "\'/dev/ws\'";',
 ):
