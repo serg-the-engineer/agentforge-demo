@@ -27,6 +27,7 @@ for rel_path in (
     "site/assets/styles.css",
     "site/version.json",
     "docker-compose.yml",
+    "beads-ui/Dockerfile",
     "nginx/default.conf",
     "AGENTS.md",
     "README.md",
@@ -92,6 +93,7 @@ version_payload = json.loads(Path("site/version.json").read_text(encoding="utf-8
 html_text = Path("site/index.html").read_text(encoding="utf-8")
 game_text = Path("site/assets/game.js").read_text(encoding="utf-8")
 compose_text = Path("docker-compose.yml").read_text(encoding="utf-8")
+beads_ui_dockerfile_text = Path("beads-ui/Dockerfile").read_text(encoding="utf-8")
 agents_text = Path("AGENTS.md").read_text(encoding="utf-8")
 readme_text = Path("README.md").read_text(encoding="utf-8")
 makefile_text = Path("Makefile").read_text(encoding="utf-8")
@@ -133,10 +135,18 @@ for marker in (
     '"6380"',
     '"127.0.0.1:3307:3306"',
     'dolthub/dolt-sql-server:latest',
+    'dockerfile: beads-ui/Dockerfile',
     'sh ./scripts/beads_shared_init.sh',
 ):
     if marker not in compose_text:
         raise SystemExit(f"docker-compose.yml missing contract marker: {marker}")
+
+for marker in (
+    "FROM node:20-alpine",
+    "npm install -g beads-ui",
+):
+    if marker not in beads_ui_dockerfile_text:
+        raise SystemExit(f"beads-ui/Dockerfile missing contract marker: {marker}")
 
 for marker in (
     "<!-- BEGIN BEADS INTEGRATION -->",

@@ -82,7 +82,9 @@ services:
     restart: unless-stopped
 
   beads-ui:
-    image: ghcr.io/mantoni/beads-ui:latest
+    build:
+      context: .
+      dockerfile: beads-ui/Dockerfile
     working_dir: /workspace
     environment:
       BEADS_DOLT_PASSWORD: ${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}

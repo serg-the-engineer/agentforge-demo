@@ -9,7 +9,7 @@ The runtime topology is fixed:
 - `web`: `nginx`, listens on `8081`, serves static files and proxies `/api/`
 - `api`: tiny Python API, listens on `9001`
 - `beads-dolt`: shared Beads Dolt backend, listens on `3306` internally and binds `127.0.0.1:3307` on the host
-- `beads-ui`: Beads task UI, listens on `8080` internally and is proxied via `web`
+- `beads-ui`: Beads task UI, installed from `npm` in a local image, listens on `8080` internally and is proxied via `web`
 - `db`: Postgres, listens on `5433`
 - `redis`: auxiliary Redis instance, listens on `6380`
 
@@ -36,6 +36,7 @@ The contract is:
 - `beads-dolt` binds loopback-only on the host for agent access (`127.0.0.1:3307`)
 - `web` keeps the external network alias `demo-agentforge-web`
 - `beads-ui` bind-mounts the project checkout so it shares the repository fingerprint with host-side agent checkouts
+- `beads-ui` is built from `beads-ui/Dockerfile` and installs `beads-ui` via `npm`
 - internal ports stay offset from defaults: `8081`, `9001`, `3306`, `8080`, `5433`, `6380`
 
 This is what keeps the main AgentForge compose unchanged while the demo evolves.
@@ -83,7 +84,7 @@ That applies to both the game UI and the Beads UI mounted at `/dev/tasks`.
 The demo now ships with a Beads-first task workspace for human approvals and handoffs.
 
 - `beads-dolt` is now the shared Beads backend. It keeps its state in `./.beads-host/dolt` on the host and binds `127.0.0.1:3307` for host-local clients.
-- `beads-ui` now runs against the project checkout itself, so the UI and host-side agent checkouts use the same repo fingerprint and the same shared backend.
+- `beads-ui` now runs against the project checkout itself, is installed through `npm`, and keeps the same repo fingerprint as host-side agent checkouts while using the shared backend.
 - Run `make beads-init` once per local checkout to attach that checkout to the shared backend and seed the same `beads/PRIME.md` and `mol-change-request` files for local CLI use.
 - If you are on another machine, open `ssh -N -L 3307:127.0.0.1:3307 <demo-host>` first, then run `make beads-init`.
 - Run `bd prime` at the start of each agent session; this repo overrides the default Beads primer with `beads/PRIME.md`.
@@ -141,7 +142,7 @@ export BEADS_DOLT_PASSWORD=demo-agentforge-beads
 docker compose up --build -d
 ```
 
-The first start now also creates `./.beads-host/dolt` for the shared Beads backend and attaches `beads-ui` to it through the project checkout.
+The first start now also builds the local `beads-ui` image, creates `./.beads-host/dolt` for the shared Beads backend, and attaches `beads-ui` to it through the project checkout.
 Host-side agents can connect directly with `make beads-init`. Remote agents should use an SSH tunnel to `127.0.0.1:3307` first.
 
 ## CI/CD Contract
