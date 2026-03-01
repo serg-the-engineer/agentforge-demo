@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Demo AgentForge Snake</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body data-app-version="0.1.0">
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">AgentForge demo</p>
+        <h1>Snake on the demo-agentforge stack</h1>
+        <p class="lede">
+          Minimal static frontend, tiny game loop, and a version banner that appears when
+          a newer frontend revision is detected.
+        </p>
+      </section>
+
+      <section class="game-panel">
+        <div class="notice" id="update-banner" hidden>
+          <strong>New version ready:</strong>
+          <span id="update-version">unknown</span>
+          <button type="button" id="refresh-button">Refresh page</button>
+        </div>
+
+        <div class="hud">
+          <div>
+            <span class="label">Score</span>
+            <span class="value" id="score">0</span>
+          </div>
+          <div>
+            <span class="label">Status</span>
+            <span class="value" id="status">Running</span>
+          </div>
+          <div>
+            <span class="label">Version</span>
+            <span class="value" id="current-version">0.1.0</span>
+          </div>
+          <div>
+            <span class="label">Server Best</span>
+            <span class="value" id="server-best">--</span>
+          </div>
+        </div>
+
+        <canvas
+          id="game-board"
+          width="360"
+          height="360"
+          aria-label="Snake game board"
+          role="img"
+        ></canvas>
+
+        <div class="controls">
+          <button type="button" id="restart-button">Restart</button>
+          <p>Use arrow keys. Hit space after a crash to start again.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="/assets/game.js" defer></script>
+  </body>
+</html>

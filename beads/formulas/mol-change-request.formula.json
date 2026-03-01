@@ -1,0 +1,69 @@
+{
+  "formula": "mol-change-request",
+  "title": "Change Request",
+  "description": "Beads-first CR workflow: plan -> implement -> review -> CI -> merge -> deploy -> acceptance",
+  "steps": [
+    {
+      "id": "plan",
+      "title": "Plan",
+      "type": "agent",
+      "prompt": "Analyze the request. Produce a concrete plan and list any clarifying questions. If questions are required, set outcome=needs_human."
+    },
+    {
+      "id": "plan_approval",
+      "title": "Approve plan",
+      "type": "human",
+      "depends_on": ["plan"],
+      "gate": { "type": "human" }
+    },
+    {
+      "id": "implement",
+      "title": "Implement",
+      "type": "agent",
+      "depends_on": ["plan_approval"],
+      "prompt": "Implement the approved plan. Create/push a branch and open a PR. Link the PR URL back into the Change Request."
+    },
+    {
+      "id": "review",
+      "title": "Agent review",
+      "type": "agent",
+      "depends_on": ["implement"],
+      "prompt": "Run Codex in reviewer mode against the diff. Record an explicit decision and create separate Beads tasks for any findings."
+    },
+    {
+      "id": "ci",
+      "title": "Wait for CI",
+      "type": "gate",
+      "depends_on": ["review"],
+      "gate": { "type": "gh:run" }
+    },
+    {
+      "id": "merge_approval",
+      "title": "Approve merge",
+      "type": "human",
+      "depends_on": ["ci"],
+      "gate": { "type": "human" }
+    },
+    {
+      "id": "merge",
+      "title": "Merge",
+      "type": "agent",
+      "depends_on": ["merge_approval"],
+      "prompt": "Merge the PR (no auto-merge without this gate)."
+    },
+    {
+      "id": "deploy",
+      "title": "Deploy",
+      "type": "agent",
+      "depends_on": ["merge"],
+      "prompt": "Deploy the change to the demo host and post the URL."
+    },
+    {
+      "id": "acceptance",
+      "title": "Acceptance",
+      "type": "human",
+      "depends_on": ["deploy"],
+      "gate": { "type": "human" }
+    }
+  ]
+}

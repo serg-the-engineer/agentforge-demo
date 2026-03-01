@@ -1,0 +1,187 @@
+:root {
+  color-scheme: dark;
+  --bg-top: #08111f;
+  --bg-bottom: #132b27;
+  --panel: rgba(9, 17, 31, 0.82);
+  --line: rgba(153, 255, 153, 0.16);
+  --text: #eef7f2;
+  --muted: #9db1ab;
+  --accent: #9cff57;
+  --accent-strong: #6df04e;
+  --danger: #ffd36a;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Avenir Next Condensed", "Trebuchet MS", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top right, rgba(156, 255, 87, 0.12), transparent 28rem),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.75rem 1.1rem;
+  font: inherit;
+  font-weight: 700;
+  color: #09111f;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+.shell {
+  width: min(100%, 72rem);
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(18rem, 24rem) minmax(18rem, 1fr);
+  align-items: start;
+}
+
+.hero,
+.game-panel {
+  border: 1px solid rgba(157, 177, 171, 0.14);
+  border-radius: 1.5rem;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.hero {
+  padding: 1.6rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2.25rem, 5vw, 4rem);
+  line-height: 0.95;
+}
+
+.lede {
+  margin: 1rem 0 0;
+  max-width: 28ch;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
+.game-panel {
+  padding: 1.25rem;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 211, 106, 0.26);
+  background: rgba(255, 211, 106, 0.12);
+  color: #fff2c4;
+}
+
+.hud {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.hud div {
+  padding: 0.85rem 0.95rem;
+  border-radius: 1rem;
+  background: rgba(7, 14, 25, 0.72);
+  border: 1px solid rgba(157, 177, 171, 0.1);
+}
+
+.label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.value {
+  font-family: "Cascadia Mono", "SFMono-Regular", monospace;
+  font-size: 1.1rem;
+}
+
+#game-board {
+  width: min(100%, 32rem);
+  aspect-ratio: 1;
+  display: block;
+  margin: 0 auto;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(157, 177, 171, 0.16);
+  background:
+    linear-gradient(90deg, transparent 5%, rgba(156, 255, 87, 0.04) 5%, rgba(156, 255, 87, 0.04) 95%, transparent 95%),
+    linear-gradient(180deg, rgba(6, 12, 22, 0.98), rgba(10, 27, 18, 0.94));
+}
+
+.controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+}
+
+.controls p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .hero h1 {
+    max-width: 10ch;
+  }
+}
+
+@media (max-width: 560px) {
+  .shell {
+    padding-inline: 0.85rem;
+  }
+
+  .game-panel,
+  .hero {
+    border-radius: 1.2rem;
+  }
+
+  .hud {
+    grid-template-columns: 1fr;
+  }
+
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

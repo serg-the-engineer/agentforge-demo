@@ -1,0 +1,115 @@
+services:
+  db:
+    image: postgres:16-alpine
+    command:
+      - postgres
+      - -p
+      - "5433"
+    environment:
+      POSTGRES_DB: demo_agentforge
+      POSTGRES_USER: demo_agentforge
+      POSTGRES_PASSWORD: demo_agentforge
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5433 -U demo_agentforge -d demo_agentforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - demo-agentforge-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --port
+      - "6380"
+      - --save
+      - "60"
+      - "1"
+      - --appendonly
+      - "yes"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - demo-agentforge-redis-data:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+    environment:
+      DEMO_API_PORT: "9001"
+      DEMO_DATABASE_URL: postgresql://demo_agentforge:demo_agentforge@db:5433/demo_agentforge?sslmode=disable
+      DEMO_REDIS_URL: redis://redis:6380/0
+    expose:
+      - "9001"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9001/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  beads-ui:
+    image: ghcr.io/mantoni/beads-ui:latest
+    working_dir: /workspace
+    command:
+      - sh
+      - -lc
+      - |
+        bd init --gitignore >/dev/null 2>&1 || true
+        mkdir -p .beads/formulas
+        cp -f /seed/AGENTS.md /workspace/AGENTS.md
+        cp -f /seed/formulas/mol-change-request.formula.json .beads/formulas/mol-change-request.formula.json
+        exec bdui --host 0.0.0.0 --port 8080
+    expose:
+      - "8080"
+    volumes:
+      - demo-agentforge-beads-data:/workspace
+      - ./AGENTS.md:/seed/AGENTS.md:ro
+      - ./beads/formulas:/seed/formulas:ro
+    restart: unless-stopped
+
+  web:
+    image: nginx:1.27.5-alpine
+    expose:
+      - "8081"
+    networks:
+      default: {}
+      edge:
+        aliases:
+          - demo-agentforge-web
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./site:/usr/share/nginx/html:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      beads-ui:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/ || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+networks:
+  edge:
+    external: true
+    name: agentforge-edge
+
+volumes:
+  demo-agentforge-postgres-data:
+  demo-agentforge-redis-data:
+  demo-agentforge-beads-data:
