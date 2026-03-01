@@ -35,6 +35,9 @@ jobs:
       DEPLOY_SSH_KEY: ${{ secrets.DEMO_DEPLOY_SSH_KEY }}
       DEPLOY_KNOWN_HOSTS: ${{ secrets.DEMO_DEPLOY_KNOWN_HOSTS }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Validate deploy secrets
         run: |
           set -eu
@@ -54,15 +57,27 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/id_ed25519"
 
+      - name: Sync project to demo host
+        run: |
+          set -eu
+          tar \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.beads' \
+            --exclude='.beads-host' \
+            -czf - . \
+          | ssh -p "${DEPLOY_PORT:-22}" -i "$HOME/.ssh/id_ed25519" "${DEPLOY_USER}@${DEPLOY_HOST}" '
+            set -eu
+            mkdir -p /srv/agentforge-demo
+            tar -xzf - -C /srv/agentforge-demo
+          '
+
       - name: Deploy on demo host
         run: |
           set -eu
           ssh -p "${DEPLOY_PORT:-22}" -i "$HOME/.ssh/id_ed25519" "${DEPLOY_USER}@${DEPLOY_HOST}" <<'EOF'
           set -eu
           cd /srv/agentforge-demo
-          git fetch origin
-          git checkout main
-          git pull --ff-only origin main
           export BEADS_DOLT_PASSWORD="${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}"
           docker compose up --build -d
           docker compose ps

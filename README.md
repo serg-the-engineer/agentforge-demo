@@ -151,9 +151,9 @@ The repository now ships with GitHub Actions workflow `.github/workflows/cicd.ym
 
 - `validate` runs on `pull_request`, `push` to `main`, and `workflow_dispatch`, and executes `make verify-ci`
 - `deploy` runs only after successful `validate` and only for non-PR events, then deploys on the demo host
-- deployment command sequence on host:
+- deployment flow:
   1. `cd /srv/agentforge-demo`
-  2. `git fetch origin && git checkout main && git pull --ff-only origin main`
+  2. upload current workflow checkout to host via SSH (`tar` stream, excludes `.git`, `.github`, `.beads`, `.beads-host`)
   3. `docker compose up --build -d`
 
 Required repository secrets for deployment:
