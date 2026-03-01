@@ -310,6 +310,7 @@ for marker in (
     "make verify-ci",
     "/srv/agentforge-demo",
     "docker compose up --build -d",
+    "docker compose up -d --no-deps --force-recreate web beads-ui",
 ):
     if marker not in workflow_text:
         raise SystemExit(f".github/workflows/cicd.yml missing marker: {marker}")

@@ -158,6 +158,7 @@ The repository now ships with GitHub Actions workflow `.github/workflows/cicd.ym
   1. `cd /srv/agentforge-demo`
   2. upload current workflow checkout to host via SSH (`tar` stream, excludes `.git`, `.github`, `.beads`, `.beads-host`)
   3. `docker compose up --build -d`
+  4. `docker compose up -d --no-deps --force-recreate web beads-ui`
 
 Required repository secrets for deployment:
 
@@ -181,6 +182,7 @@ That means demo CI/CD may safely run:
 
 ```bash
 docker compose up --build -d
+docker compose up -d --no-deps --force-recreate web beads-ui
 ```
 
 The demo pipeline does not need to know:

@@ -80,5 +80,6 @@ jobs:
           cd /srv/agentforge-demo
           export BEADS_DOLT_PASSWORD="${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}"
           docker compose up --build -d
+          docker compose up -d --no-deps --force-recreate web beads-ui
           docker compose ps
           EOF
