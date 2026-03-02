@@ -1,2 +1,6 @@
 .beads/
 .beads-host/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

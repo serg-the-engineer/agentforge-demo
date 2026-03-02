@@ -36,6 +36,7 @@
 
 - Start each session by making sure `make beads-init` has already been run for this checkout, then run `bd prime`. After that, use `bd mol current` or `bd ready` to confirm the active unblocked step before you claim work.
 - If you are not on the demo host, open an SSH tunnel to the host-local Beads backend first: `ssh -N -L 3307:127.0.0.1:3307 <demo-host>`, then run `make beads-init`.
+- The shared Beads backend uses the fixed database `agentforge_demo` and issue prefix `agentforge-demo`, so every checkout and the Beads UI resolve the same tasks even if their directory names differ.
 - Agents should publish handoff summaries, verification results, questions, and links back into the active Change Request.
 - Run `make verify-fast` after each small implementation slice. Run `make verify` before handoff, review, or `review_approval`, then post the result in the active Change Request with `bd comments add <id> ...`.
 - If the next step requires a human, record the blocking questions in the current gate instead of opening a side channel.

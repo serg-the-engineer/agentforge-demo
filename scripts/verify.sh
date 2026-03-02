@@ -193,7 +193,11 @@ for marker in (
 for marker in (
     "legacy_cli=0",
     "bd init --help",
+    'shared_prefix="${BEADS_SHARED_PREFIX:-agentforge-demo}"',
+    'shared_database="${BEADS_SHARED_DATABASE:-agentforge_demo}"',
     "bd init --force --server",
+    '--prefix "$shared_prefix"',
+    '--database "$shared_database"',
     "--server-host \"$host\"",
     "--server-port \"$port\"",
     "--server-user \"$user\"",
@@ -208,6 +212,8 @@ for marker in (
     "`make beads-init`",
     "`bd prime`",
     "`bd ready`",
+    "`agentforge-demo`",
+    "`agentforge_demo`",
     "`review_approval`",
     "review approval is a Beads status gate",
 ):
@@ -218,6 +224,8 @@ for marker in (
     "make beads-init",
     "beads/PRIME.md",
     "bd prime",
+    "`agentforge-demo`",
+    "`agentforge_demo`",
     "`review_approval`",
     "review approval is recorded by humans in Beads",
 ):

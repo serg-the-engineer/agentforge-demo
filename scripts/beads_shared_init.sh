@@ -5,6 +5,8 @@ host="${BEADS_SHARED_HOST:-127.0.0.1}"
 port="${BEADS_SHARED_PORT:-3307}"
 user="${BEADS_SHARED_USER:-root}"
 attempts="${BEADS_INIT_ATTEMPTS:-1}"
+shared_prefix="${BEADS_SHARED_PREFIX:-agentforge-demo}"
+shared_database="${BEADS_SHARED_DATABASE:-agentforge_demo}"
 
 export BEADS_DOLT_PASSWORD="${BEADS_DOLT_PASSWORD:-demo-agentforge-beads}"
 
@@ -18,6 +20,11 @@ if bd init --help 2>/dev/null | grep -q -- '--backend'; then
 	legacy_cli=1
 fi
 
+supports_database_flag=0
+if bd init --help 2>/dev/null | grep -q -- '--database'; then
+	supports_database_flag=1
+fi
+
 if command -v git >/dev/null 2>&1; then
 	if [ ! -d .git ]; then
 		git init -q >/dev/null 2>&1 || true
@@ -29,18 +36,41 @@ fi
 
 run_bd_init() {
 	if [ "$legacy_cli" = "1" ]; then
-		bd init --force --backend dolt --server \
-			--server-host "$host" \
-			--server-port "$port" \
-			--server-user "$user" \
-			--skip-hooks \
-			--skip-merge-driver
+		if [ "$supports_database_flag" = "1" ]; then
+			bd init --force --backend dolt --server \
+				--prefix "$shared_prefix" \
+				--database "$shared_database" \
+				--server-host "$host" \
+				--server-port "$port" \
+				--server-user "$user" \
+				--skip-hooks \
+				--skip-merge-driver
+		else
+			bd init --force --backend dolt --server \
+				--prefix "$shared_prefix" \
+				--server-host "$host" \
+				--server-port "$port" \
+				--server-user "$user" \
+				--skip-hooks \
+				--skip-merge-driver
+		fi
 	else
-		bd init --force --server \
-			--server-host "$host" \
-			--server-port "$port" \
-			--server-user "$user" \
-			--skip-hooks
+		if [ "$supports_database_flag" = "1" ]; then
+			bd init --force --server \
+				--prefix "$shared_prefix" \
+				--database "$shared_database" \
+				--server-host "$host" \
+				--server-port "$port" \
+				--server-user "$user" \
+				--skip-hooks
+		else
+			bd init --force --server \
+				--prefix "$shared_prefix" \
+				--server-host "$host" \
+				--server-port "$port" \
+				--server-user "$user" \
+				--skip-hooks
+		fi
 	fi
 }
 

@@ -85,6 +85,7 @@ That applies to both the game UI and the Beads UI mounted at `/dev/tasks`.
 The demo now ships with a Beads-first task workspace for human approvals and handoffs.
 
 - `beads-dolt` is now the shared Beads backend. It keeps its state in `./.beads-host/dolt` on the host and binds `127.0.0.1:3307` for host-local clients.
+- The shared Beads backend uses the fixed database `agentforge_demo` and issue prefix `agentforge-demo` so `beads-ui` and host-side agents see the same tasks regardless of their working directory name.
 - `beads-ui` now runs against the project checkout itself, is installed through `npm`, and keeps the same repo fingerprint as host-side agent checkouts while using the shared backend.
 - Run `make beads-init` once per local checkout to attach that checkout to the shared backend and seed the same `beads/PRIME.md` and `mol-change-request` files for local CLI use.
 - If you are on another machine, open `ssh -N -L 3307:127.0.0.1:3307 <demo-host>` first, then run `make beads-init`.
