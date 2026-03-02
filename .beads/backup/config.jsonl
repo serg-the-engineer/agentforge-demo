@@ -9,3 +9,4 @@
 {"key":"compaction_enabled","value":"false"}
 {"key":"issue_prefix","value":"agentforge-demo"}
 {"key":"schema_version","value":"6"}
+{"key":"types.custom","value":"types.custom(notset),gate"}
