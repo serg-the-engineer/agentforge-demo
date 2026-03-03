@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hammer with dark sunglasses">
+  <defs>
+    <linearGradient id="hammer-metal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffe08a"/>
+      <stop offset="100%" stop-color="#c38b2f"/>
+    </linearGradient>
+    <linearGradient id="handle" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#925a22"/>
+      <stop offset="100%" stop-color="#5e3414"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="rotate(-28 32 32)">
+    <rect x="25" y="10" width="14" height="18" rx="4" fill="url(#hammer-metal)" stroke="#4a2a11" stroke-width="2"/>
+    <rect x="17" y="14" width="30" height="7" rx="3.5" fill="url(#hammer-metal)" stroke="#4a2a11" stroke-width="2"/>
+    <rect x="28" y="26" width="8" height="28" rx="4" fill="url(#handle)" stroke="#3d1f0c" stroke-width="2"/>
+    <rect x="24" y="49" width="16" height="6" rx="3" fill="#2a1409"/>
+  </g>
+
+  <g transform="translate(0 1)">
+    <rect x="15" y="23" width="15" height="10" rx="3" fill="#11151b" stroke="#d7ecff" stroke-width="1.5"/>
+    <rect x="34" y="23" width="15" height="10" rx="3" fill="#11151b" stroke="#d7ecff" stroke-width="1.5"/>
+    <rect x="30" y="26" width="4" height="3" rx="1.5" fill="#d7ecff"/>
+    <path d="M18 26.5h9M37 26.5h9" stroke="#5bd3ff" stroke-linecap="round" stroke-width="1.5" opacity="0.7"/>
+  </g>
+</svg>

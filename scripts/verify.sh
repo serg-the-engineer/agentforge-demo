@@ -14,7 +14,13 @@ from pathlib import Path
 import ast
 import json
 
-for rel_path in ("api/server.py", "tests/test_api_server.py"):
+for rel_path in (
+    "api/server.py",
+    "task-tracker/server.py",
+    "tests/test_api_server.py",
+    "tests/test_task_tracker_server.py",
+    "tests/test_task_tracker_runtime_api.py",
+):
     path = Path(rel_path)
     if not path.is_file():
         raise SystemExit(f"missing required file: {rel_path}")
@@ -24,6 +30,7 @@ for rel_path in (
     ".gitignore",
     ".github/workflows/cicd.yml",
     "site/index.html",
+    "site/assets/favicon.svg",
     "site/assets/game.js",
     "site/assets/styles.css",
     "site/version.json",
@@ -36,11 +43,18 @@ for rel_path in (
     "scripts/beads_shared_init.sh",
     "beads/PRIME.md",
     "beads/formulas/mol-change-request.formula.json",
+    "docs/task-tracker-spec.md",
+    "task-tracker/Dockerfile",
+    "task-tracker/README.md",
 ):
     if not Path(rel_path).is_file():
         raise SystemExit(f"missing required file: {rel_path}")
 
 json.loads(Path("site/version.json").read_text(encoding="utf-8"))
+
+html_text = Path("site/index.html").read_text(encoding="utf-8")
+if 'rel="icon"' not in html_text or 'href="/assets/favicon.svg"' not in html_text:
+    raise SystemExit("site/index.html must link /assets/favicon.svg as rel=icon")
 PY
 }
 
@@ -58,6 +72,7 @@ roots = (
     Path("nginx"),
     Path("beads"),
     Path("scripts"),
+    Path("task-tracker"),
     Path("tests"),
 )
 
@@ -105,6 +120,10 @@ formula_text = Path("beads/formulas/mol-change-request.formula.json").read_text(
 )
 formula_payload = json.loads(formula_text)
 workflow_text = Path(".github/workflows/cicd.yml").read_text(encoding="utf-8")
+task_tracker_spec_text = Path("docs/task-tracker-spec.md").read_text(encoding="utf-8")
+task_tracker_server_text = Path("task-tracker/server.py").read_text(encoding="utf-8")
+task_tracker_dockerfile_text = Path("task-tracker/Dockerfile").read_text(encoding="utf-8")
+task_tracker_readme_text = Path("task-tracker/README.md").read_text(encoding="utf-8")
 
 match = re.search(r'data-app-version="([^"]+)"', html_text)
 if not match:
@@ -322,6 +341,62 @@ for marker in (
 ):
     if marker not in workflow_text:
         raise SystemExit(f".github/workflows/cicd.yml missing marker: {marker}")
+
+for marker in (
+    "# Task Tracker MVP Specification",
+    "## Status Model",
+    "backlog -> ready -> in_progress -> done",
+    "blocked",
+    "awaiting_input",
+    "## Gate Approval Semantics",
+    "reject-with-comment",
+    "## API Contract",
+    "POST /api/v1/tasks/{task_id}/actions/start_work",
+    "POST /api/v1/transitions/{attempt_id}/approve",
+    "POST /api/v1/transitions/{attempt_id}/reject",
+    "GET /api/v1/ui/snapshot",
+    "GET /api/v1/ui/updates?cursor=<cursor>&timeout=<seconds>",
+):
+    if marker not in task_tracker_spec_text:
+        raise SystemExit(f"docs/task-tracker-spec.md missing contract marker: {marker}")
+
+for marker in (
+    "/healthz",
+    '"status": "ok"',
+    "create_server(",
+):
+    if marker not in task_tracker_server_text:
+        raise SystemExit(f"task-tracker/server.py missing contract marker: {marker}")
+
+for marker in (
+    "COPY server.py /app/server.py",
+    'CMD ["python", "/app/server.py"]',
+):
+    if marker not in task_tracker_dockerfile_text:
+        raise SystemExit(f"task-tracker/Dockerfile missing contract marker: {marker}")
+
+for marker in (
+    "# Task Tracker Sidecar (T02 Scaffold)",
+    "GET /healthz",
+    "## T12: Sidecar Packaging and Usage",
+    "### Compose snippet",
+    "task-tracker-db:",
+    "task-tracker-migrate:",
+    "task-tracker:",
+    "TASK_TRACKER_DATABASE_URL=postgresql://task_tracker:task_tracker@127.0.0.1:55432/task_tracker",
+    "### Quickstart",
+    "docker compose run --rm task-tracker-migrate",
+    "curl -sS http://127.0.0.1:9102/healthz",
+    "### Runbook",
+    "curl -sS \"http://127.0.0.1:9102/api/v1/ui/snapshot?project_key=demo\"",
+    "psql \"postgresql://task_tracker:task_tracker@127.0.0.1:55432/task_tracker\"",
+):
+    if marker not in task_tracker_readme_text:
+        raise SystemExit(f"task-tracker/README.md missing contract marker: {marker}")
+
+placeholder_tokens = ("TO" + "DO", "TB" + "D", "TB" + "C", "XX" + "X")
+if re.search(r"\b(" + "|".join(placeholder_tokens) + r")\b", task_tracker_spec_text):
+    raise SystemExit("docs/task-tracker-spec.md must not contain unresolved placeholders")
 PY
 }
 
