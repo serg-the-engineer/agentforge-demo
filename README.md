@@ -80,23 +80,6 @@ The public demo domain is protected with HTTP basic auth:
 
 That applies to both the game UI and the Beads UI mounted at `/dev/tasks`.
 
-## Beads Workflow
-
-The demo now ships with a Beads-first task workspace for human approvals and handoffs.
-
-- `beads-dolt` is now the shared Beads backend. It keeps its state in `./.beads-host/dolt` on the host and binds `127.0.0.1:3307` for host-local clients.
-- The shared Beads backend uses the fixed database `agentforge_demo` and issue prefix `agentforge-demo` so `beads-ui` and host-side agents see the same tasks regardless of their working directory name.
-- `beads-ui` now runs against the project checkout itself, is installed through `npm`, and keeps the same repo fingerprint as host-side agent checkouts while using the shared backend.
-- Run `make beads-init` once per local checkout to attach that checkout to the shared backend and seed the same `beads/PRIME.md` and `mol-change-request` files for local CLI use.
-- If you are on another machine, open `ssh -N -L 3307:127.0.0.1:3307 <demo-host>` first, then run `make beads-init`.
-- Run `bd prime` at the start of each agent session; this repo overrides the default Beads primer with `beads/PRIME.md`.
-- Open the Beads UI at `https://demo.agentforge.redmadrobot.com/dev/tasks` after deploy.
-- Start a new workflow with `bd mol pour mol-change-request`.
-- The canonical Change Request path is `plan -> plan_approval -> implement -> review -> review_approval -> ci -> merge -> deploy -> acceptance`.
-- For code review, `review_approval` is the human gate in Beads: review approval is recorded by humans in Beads and does not require a GitHub PR review approval.
-- For ad-hoc work, run `bd ready` before claiming a task. Inside an active Change Request, run `bd mol current`, then `bd update <id> --status in_progress` when a step starts, `bd comments add <id> "..."` for verification and handoff notes, and `bd close <id>` after green verification.
-- Because every client writes directly to the same Dolt backend, status changes appear in Beads UI as soon as the `bd` command succeeds. `bd sync` is not required for live UI updates.
-
 ## Local Delivery Workflow
 
 This demo follows the same delivery discipline as the main repository, adapted to a smaller runtime:
