@@ -43,6 +43,11 @@ class TaskTrackerServerTests(unittest.TestCase):
 
         html = server_module.render_operational_ui_html("project-ui")
 
+        self.assertIn('id="tt-create-title"', html)
+        self.assertIn('id="tt-create-description"', html)
+        self.assertIn('id="tt-create-priority"', html)
+        self.assertIn('data-action="create-task"', html)
+        self.assertIn("/api/v1/tasks", html)
         self.assertIn('id="tt-board"', html)
         self.assertIn('id="tt-details"', html)
         self.assertIn('data-action="approve-transition"', html)

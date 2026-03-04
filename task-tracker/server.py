@@ -107,6 +107,10 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
       .toolbar input {
         min-width: 220px;
       }
+      .toolbar input.compact {
+        min-width: 140px;
+        width: 140px;
+      }
       button {
         cursor: pointer;
         border: 1px solid transparent;
@@ -295,6 +299,20 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         <div class="toolbar">
           <span id="tt-project-label" class="chip">Project: <span id="tt-project-value"></span></span>
           <button id="tt-refresh" class="btn-secondary" type="button">Refresh</button>
+          <label for="tt-create-title">New task</label>
+          <input id="tt-create-title" type="text" placeholder="task title">
+          <input id="tt-create-description" type="text" placeholder="description (optional)">
+          <input
+            id="tt-create-priority"
+            class="compact"
+            type="number"
+            min="0"
+            max="100"
+            placeholder="priority"
+          >
+          <button id="tt-create-task" class="btn-primary" type="button" data-action="create-task">
+            Add task
+          </button>
         </div>
         <div class="status-line">
           <span id="tt-connection-state" class="chip">idle</span>
@@ -770,6 +788,37 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         }
       }
 
+      async function createTaskFromToolbar() {
+        if (!state.projectKey) {
+          throw new Error("project key is not configured");
+        }
+        const title = requiredValue("tt-create-title", "title");
+        const description = valueOf("tt-create-description");
+        const priorityText = valueOf("tt-create-priority");
+        let priority;
+        if (priorityText) {
+          const parsed = Number(priorityText);
+          if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
+            throw new Error("priority must be an integer between 0 and 100");
+          }
+          priority = parsed;
+        }
+
+        const response = await apiPost("/api/v1/tasks", {
+          project_key: state.projectKey,
+          title: title,
+          description: description || undefined,
+          priority: priority,
+        });
+        const createdTask = response && response.task ? response.task : null;
+        if (createdTask && createdTask.id) {
+          state.selectedTaskId = createdTask.id;
+        }
+        byId("tt-create-title").value = "";
+        byId("tt-create-description").value = "";
+        byId("tt-create-priority").value = "";
+      }
+
       async function handleDetailsAction(action, button) {
         if (!state.projectKey) {
           throw new Error("project key is not configured");
@@ -891,6 +940,12 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
           if (message) {
             setStatus(message, "ok");
           }
+        });
+      });
+
+      byId("tt-create-task").addEventListener("click", () => {
+        void runAction("Task created", async () => {
+          await createTaskFromToolbar();
         });
       });
 
