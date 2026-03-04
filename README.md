@@ -12,6 +12,8 @@ The runtime topology is fixed:
 - `beads-ui`: Beads UI kept for compatibility access, installed from `npm` in a local image, listens on `8080` internally and is proxied via `web`
 - `db`: Postgres, listens on `5433`
 - `redis`: auxiliary Redis instance, listens on `6380`
+- `task-tracker-db`: Postgres for task-tracker, listens on `5432` internally and binds `127.0.0.1:55432` on the host
+- `task-tracker`: Task Tracker sidecar API/UI, listens on `9102` internally and binds `127.0.0.1:9102` on the host
 
 The API uses Postgres as the source of truth and Redis as a cache/auxiliary runtime service.
 
@@ -30,7 +32,8 @@ Delivery tracking for this project uses `task-tracker` from `task-tracker/`.
 - source of truth for active work is Task Tracker (`/ui` and `/api/v1/*`),
 - default local UI: [http://127.0.0.1:9102/ui?project_key=demo](http://127.0.0.1:9102/ui?project_key=demo),
 - quickstart and runbook live in `task-tracker/README.md`,
-- `beads-ui` and `beads-dolt` remain available for compatibility access only and are not the primary delivery tracker.
+- external demo route `/dev/tasks` points to Task Tracker UI/API through `web`,
+- `beads-ui` and `beads-dolt` remain available for compatibility access only and are exposed via `/dev/beads`.
 
 ## Fixed Compose Contract
 
@@ -39,14 +42,16 @@ The compose file is intentionally frozen. Future demo work should change applica
 The contract is:
 
 - there is exactly one compose file: `docker-compose.yml`
-- service names stay `web`, `api`, `db`, `redis`, `beads-dolt`, and `beads-ui`
+- service names stay `web`, `api`, `db`, `redis`, `beads-dolt`, `beads-ui`, `task-tracker-db`, and `task-tracker`
 - `web` is the only public ingress-facing service
-- `api`, `beads-ui`, `db`, and `redis` stay internal-only
+- `api`, `beads-ui`, `db`, `redis`, `task-tracker-db`, and `task-tracker` stay internal-only from ingress
 - `beads-dolt` binds loopback-only on the host for agent access (`127.0.0.1:3307`)
+- `task-tracker-db` binds loopback-only on the host for local SQL access (`127.0.0.1:55432`)
+- `task-tracker` binds loopback-only on the host for local health/API access (`127.0.0.1:9102`)
 - `web` keeps the external network alias `demo-agentforge-web`
 - `beads-ui` bind-mounts the project checkout so it shares the repository fingerprint with host-side agent checkouts
 - `beads-ui` is built from `beads-ui/Dockerfile` and installs `beads-ui` via `npm`
-- internal ports stay offset from defaults: `8081`, `9001`, `3306`, `8080`, `5433`, `6380`
+- internal ports stay offset from defaults: `8081`, `9001`, `3306`, `8080`, `5433`, `6380`, `5432`, `9102`
 
 This is what keeps the main AgentForge compose unchanged while the demo evolves.
 
@@ -75,8 +80,9 @@ The main AgentForge ingress routes:
 
 Inside the demo stack, `web` additionally routes:
 
-- `/dev/tasks` -> `beads-ui:8080`
-- `/dev/ws` -> `beads-ui:8080/ws` for Beads UI websocket traffic
+- `/dev/tasks` -> `task-tracker:9102`
+- `/dev/beads` -> `beads-ui:8080`
+- `/dev/beads/ws` -> `beads-ui:8080/ws` for Beads UI websocket traffic
 
 The main AgentForge stack only needs that one stable upstream.
 
@@ -87,7 +93,7 @@ The public demo domain is protected with HTTP basic auth:
 - username: `admin`
 - password: `robot`
 
-That applies to both the game UI and the Beads UI mounted at `/dev/tasks`.
+That applies to the game UI, Task Tracker UI mounted at `/dev/tasks`, and Beads UI mounted at `/dev/beads`.
 
 ## Local Delivery Workflow
 
@@ -104,6 +110,7 @@ This demo follows the same delivery discipline as the main repository, adapted t
 
 The demo now exposes stable verification entrypoints in its local `Makefile`:
 
+- `make task-tracker-migrate`: apply task-tracker migrations through the main `task-tracker` container,
 - `make task-tracker-health`: check local task-tracker health endpoint,
 - `make task-tracker-snapshot`: inspect current Task Tracker queues for `TASK_TRACKER_PROJECT_KEY` (defaults to `demo`),
 - `make verify-fast`: quick local contour for small iterations,
@@ -137,9 +144,11 @@ Then deploy the demo independently:
 ```bash
 cd demo-agentforge
 docker compose up --build -d
+docker compose run --rm task-tracker python /app/migrate.py
+docker compose up -d --no-deps --force-recreate task-tracker web
 ```
 
-The first start now also builds the local `beads-ui` image, creates `./.beads-host/dolt` for the shared Beads backend, and attaches `beads-ui` to it through the project checkout.
+The first start now also builds the local `beads-ui` and `task-tracker` images, creates `./.beads-host/dolt` for the shared Beads backend, and initializes task-tracker schema via `python /app/migrate.py` in the `task-tracker` container.
 Task Tracker setup and operations are documented in `task-tracker/README.md`.
 Remote access to the Beads backend still uses an SSH tunnel to `127.0.0.1:3307`.
 
@@ -153,7 +162,8 @@ The repository now ships with GitHub Actions workflow `.github/workflows/cicd.ym
   1. `cd /srv/agentforge-demo`
   2. upload current workflow checkout to host via SSH (`tar` stream, excludes `.git`, `.github`, `.beads`, `.beads-host`)
   3. `docker compose up --build -d`
-  4. `docker compose up -d --no-deps --force-recreate web`
+  4. `docker compose run --rm task-tracker python /app/migrate.py`
+  5. `docker compose up -d --no-deps --force-recreate task-tracker web`
 
 Required repository secrets for deployment:
 
@@ -177,7 +187,8 @@ That means demo CI/CD may safely run:
 
 ```bash
 docker compose up --build -d
-docker compose up -d --no-deps --force-recreate web
+docker compose run --rm task-tracker python /app/migrate.py
+docker compose up -d --no-deps --force-recreate task-tracker web
 ```
 
 The demo pipeline does not need to know:

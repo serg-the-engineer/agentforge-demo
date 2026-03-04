@@ -144,17 +144,6 @@ services:
       timeout: 3s
       retries: 20
 
-  task-tracker-migrate:
-    build:
-      context: ./task-tracker
-    depends_on:
-      task-tracker-db:
-        condition: service_healthy
-    environment:
-      TASK_TRACKER_DB_DSN: host=task-tracker-db port=5432 dbname=task_tracker user=task_tracker password=task_tracker
-    command: ["python", "/app/migrate.py"]
-    restart: "no"
-
   task-tracker:
     build:
       context: ./task-tracker
@@ -165,6 +154,7 @@ services:
       TASK_TRACKER_HOST: 0.0.0.0
       TASK_TRACKER_PORT: "9102"
       TASK_TRACKER_DATABASE_URL: postgresql://task_tracker:task_tracker@task-tracker-db:5432/task_tracker
+      TASK_TRACKER_DB_DSN: host=task-tracker-db port=5432 dbname=task_tracker user=task_tracker password=task_tracker
     ports:
       - "127.0.0.1:9102:9102"
     restart: unless-stopped
@@ -187,7 +177,7 @@ For host-local CLI tools, use:
 2. Apply schema migrations:
 
    ```bash
-   docker compose run --rm task-tracker-migrate
+   docker compose run --rm task-tracker python /app/migrate.py
    ```
 
 3. Start API sidecar:
@@ -229,7 +219,7 @@ For host-local CLI tools, use:
 - Re-run migrations after updating SQL files:
 
   ```bash
-  docker compose run --rm task-tracker-migrate
+  docker compose run --rm task-tracker python /app/migrate.py
   ```
 
 - Restart sidecar after deploy:

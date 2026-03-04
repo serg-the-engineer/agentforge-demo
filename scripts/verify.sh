@@ -140,11 +140,18 @@ for marker in (
     "\n  api:\n",
     "\n  db:\n",
     "\n  redis:\n",
+    "\n  beads-dolt:\n",
+    "\n  beads-ui:\n",
+    "\n  task-tracker-db:\n",
+    "\n  task-tracker:\n",
     'demo-agentforge-web',
     '"8081"',
     '"9001"',
     '"5433"',
     '"6380"',
+    '"9102"',
+    "127.0.0.1:55432:5432",
+    "127.0.0.1:9102:9102",
 ):
     if marker not in compose_text:
         raise SystemExit(f"docker-compose.yml missing contract marker: {marker}")
@@ -152,6 +159,13 @@ for marker in (
 for marker in (
     "location /api/",
     "proxy_pass http://$api_upstream;",
+    "location = /dev/tasks {",
+    "location /dev/tasks/",
+    "task-tracker:9102",
+    "location = /dev/beads {",
+    "location = /dev/beads/ws",
+    "location /dev/beads/",
+    "beads-ui:8080",
     "location / {",
     "try_files $uri $uri/ /index.html;",
 ):
@@ -174,8 +188,11 @@ for marker in (
     "## Stack",
     "## Task Tracking Workflow",
     "## Fixed Compose Contract",
+    "`/dev/tasks` -> `task-tracker:9102`",
+    "`/dev/beads` -> `beads-ui:8080`",
     "## Local Delivery Workflow",
     "`task-tracker/README.md`",
+    "`make task-tracker-migrate`",
     "`make task-tracker-health`",
     "`make task-tracker-snapshot`",
     "`make verify-fast`",
@@ -187,6 +204,7 @@ for marker in (
         raise SystemExit(f"README.md missing delivery marker: {marker}")
 
 for target in (
+    "task-tracker-migrate",
     "task-tracker-health",
     "task-tracker-snapshot",
     "verify-fast",
@@ -207,8 +225,9 @@ for marker in (
     "needs: validate",
     "make verify-ci",
     "/srv/agentforge-demo",
+    "docker compose run --rm task-tracker python /app/migrate.py",
     "docker compose up --build -d",
-    "docker compose up -d --no-deps --force-recreate web",
+    "docker compose up -d --no-deps --force-recreate task-tracker web",
 ):
     if marker not in workflow_text:
         raise SystemExit(f".github/workflows/cicd.yml missing marker: {marker}")
@@ -240,6 +259,7 @@ for marker in (
         raise SystemExit(f"task-tracker/server.py missing contract marker: {marker}")
 
 for marker in (
+    "pip install --no-cache-dir 'psycopg[binary]'",
     "COPY server.py /app/server.py",
     'CMD ["python", "/app/server.py"]',
 ):
@@ -252,11 +272,10 @@ for marker in (
     "## T12: Sidecar Packaging and Usage",
     "### Compose snippet",
     "task-tracker-db:",
-    "task-tracker-migrate:",
     "task-tracker:",
     "TASK_TRACKER_DATABASE_URL=postgresql://task_tracker:task_tracker@127.0.0.1:55432/task_tracker",
     "### Quickstart",
-    "docker compose run --rm task-tracker-migrate",
+    "docker compose run --rm task-tracker python /app/migrate.py",
     "curl -sS http://127.0.0.1:9102/healthz",
     "### Runbook",
     "curl -sS \"http://127.0.0.1:9102/api/v1/ui/snapshot?project_key=demo\"",

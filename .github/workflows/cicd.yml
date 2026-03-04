@@ -79,6 +79,7 @@ jobs:
           set -eu
           cd /srv/agentforge-demo
           docker compose up --build -d
-          docker compose up -d --no-deps --force-recreate web
+          docker compose run --rm task-tracker python /app/migrate.py
+          docker compose up -d --no-deps --force-recreate task-tracker web
           docker compose ps
           EOF

@@ -1,10 +1,11 @@
-.PHONY: help task-tracker-health task-tracker-snapshot verify-fast verify verify-ci lint-static lint-hygiene lint-contract test-unit
+.PHONY: help task-tracker-migrate task-tracker-health task-tracker-snapshot verify-fast verify verify-ci lint-static lint-hygiene lint-contract test-unit
 
 TASK_TRACKER_BASE_URL ?= http://127.0.0.1:9102
 TASK_TRACKER_PROJECT_KEY ?= demo
 
 help:
 	@printf '%s\n' \
+		'task-tracker-migrate  apply task-tracker database migrations via compose' \
 		'task-tracker-health   check task-tracker health endpoint' \
 		'task-tracker-snapshot fetch task-tracker snapshot for project key' \
 		'verify-fast    quick local demo contour' \
@@ -14,6 +15,9 @@ help:
 		'lint-hygiene   placeholder marker checks' \
 		'lint-contract  fixed runtime contract checks' \
 		'test-unit      focused stdlib unit tests'
+
+task-tracker-migrate:
+	@docker compose run --rm task-tracker python /app/migrate.py
 
 task-tracker-health:
 	@curl -sS "$(TASK_TRACKER_BASE_URL)/healthz"

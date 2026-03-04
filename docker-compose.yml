@@ -101,6 +101,53 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  task-tracker-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: task_tracker
+      POSTGRES_USER: task_tracker
+      POSTGRES_PASSWORD: task_tracker
+    expose:
+      - "5432"
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - demo-agentforge-task-tracker-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U task_tracker -d task_tracker"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  task-tracker:
+    build:
+      context: ./task-tracker
+    environment:
+      TASK_TRACKER_HOST: 0.0.0.0
+      TASK_TRACKER_PORT: "9102"
+      TASK_TRACKER_DATABASE_URL: postgresql://task_tracker:task_tracker@task-tracker-db:5432/task_tracker
+      TASK_TRACKER_DB_DSN: host=task-tracker-db port=5432 dbname=task_tracker user=task_tracker password=task_tracker
+    expose:
+      - "9102"
+    ports:
+      - "127.0.0.1:9102:9102"
+    depends_on:
+      task-tracker-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9102/healthz', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   web:
     image: nginx:1.27.5-alpine
     expose:
@@ -118,6 +165,8 @@ services:
         condition: service_healthy
       beads-ui:
         condition: service_started
+      task-tracker:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/ || exit 1"]
       interval: 30s
@@ -134,3 +183,4 @@ networks:
 volumes:
   demo-agentforge-postgres-data:
   demo-agentforge-redis-data:
+  demo-agentforge-task-tracker-postgres-data:
