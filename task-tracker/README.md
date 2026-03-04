@@ -119,6 +119,72 @@ Delivered behavior:
 - schema enforces one pending transition attempt per task via a partial unique index,
 - runtime and HTTP contract tests cover duplicate-request conflict and stale approval handling.
 
+## T13: AgentForge Bridge Protocol `v1`
+
+Bridge endpoints (all under one prefix):
+
+- `GET /api/agentforge/config`
+- `GET /api/agentforge/ready-candidates?limit=<n>&project_id=<id>&connector_id=<id>`
+- `POST /api/agentforge/ready-candidates/{external_id}/planned`
+- `POST /api/agentforge/ready-candidates/{external_id}/done`
+
+Delivered behavior:
+
+- Basic auth is mandatory for all `/api/agentforge/*` routes.
+- `ready-candidates` requires `limit`, `project_id`, `connector_id`.
+- ready list is ordered strictly by task priority (`priority DESC`).
+- `ready-candidates` returns `200 {"candidates":[...]}` or `204` when empty.
+- `planned` and `done` require `Idempotency-Key`.
+- `planned` is concurrency-safe for `ready -> in_progress`.
+- `done` accepts statuses `completed|failed|cancelled` and stores:
+  `attempts_used`, `max_attempts`, `summary`, `error_code`, `done_at`.
+
+Basic auth + endpoint examples:
+
+```bash
+curl -sS -u admin:robot \
+  "http://127.0.0.1:9102/api/agentforge/config"
+```
+
+```bash
+curl -sS -u admin:robot \
+  "http://127.0.0.1:9102/api/agentforge/ready-candidates?limit=5&project_id=demo&connector_id=demo-connector"
+```
+
+```bash
+curl -sS -u admin:robot \
+  -H "Idempotency-Key: plan-001" \
+  -X POST \
+  "http://127.0.0.1:9102/api/agentforge/ready-candidates/<external_id>/planned"
+```
+
+```bash
+curl -sS -u admin:robot \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: done-001" \
+  -X POST \
+  -d '{
+    "status": "completed",
+    "attempts_used": 1,
+    "max_attempts": 3,
+    "summary": "all checks passed",
+    "error_code": null,
+    "done_at": "2026-03-04T18:00:00Z"
+  }' \
+  "http://127.0.0.1:9102/api/agentforge/ready-candidates/<external_id>/done"
+```
+
+### Как подключить AgentForge через `/api/agentforge/config`
+
+1. Запросите `GET /api/agentforge/config` с Basic auth.
+2. Возьмите из ответа:
+   `base_url`, `project_id`, `connector_id`, `paths.*`,
+   и блок `agentforge_variables`.
+3. Настройте AgentForge connector на `protocol_version=v1`,
+   `auth_type=basic` и используйте возвращенные относительные `paths`.
+4. Проверьте E2E путь:
+   `ready-candidates -> planned -> done`.
+
 ## T12: Sidecar Packaging and Usage
 
 The sidecar can run next to any project as a dedicated `task-tracker` + Postgres pair.

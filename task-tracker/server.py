@@ -1,3 +1,7 @@
+import base64
+import binascii
+import hashlib
+import hmac
 import json
 import os
 import time
@@ -17,6 +21,41 @@ TASK_TRACKER_DATABASE_URL = os.environ.get(
 TASK_TRACKER_UI_PROJECT_KEY = (
     os.environ.get("TASK_TRACKER_UI_PROJECT_KEY", "demo").strip() or "demo"
 )
+TASK_TRACKER_AGENTFORGE_PROTOCOL_VERSION = "v1"
+TASK_TRACKER_AGENTFORGE_API_PREFIX = "/api/agentforge"
+TASK_TRACKER_AGENTFORGE_CONFIG_PATH = f"{TASK_TRACKER_AGENTFORGE_API_PREFIX}/config"
+TASK_TRACKER_AGENTFORGE_READY_CANDIDATES_PATH = (
+    f"{TASK_TRACKER_AGENTFORGE_API_PREFIX}/ready-candidates"
+)
+TASK_TRACKER_AGENTFORGE_PLANNED_PATH = (
+    f"{TASK_TRACKER_AGENTFORGE_READY_CANDIDATES_PATH}/{{external_id}}/planned"
+)
+TASK_TRACKER_AGENTFORGE_DONE_PATH = (
+    f"{TASK_TRACKER_AGENTFORGE_READY_CANDIDATES_PATH}/{{external_id}}/done"
+)
+TASK_TRACKER_AGENTFORGE_PROJECT_ID = (
+    os.environ.get("TASK_TRACKER_AGENTFORGE_PROJECT_ID", TASK_TRACKER_UI_PROJECT_KEY).strip()
+    or TASK_TRACKER_UI_PROJECT_KEY
+)
+TASK_TRACKER_AGENTFORGE_CONNECTOR_ID = (
+    os.environ.get("TASK_TRACKER_AGENTFORGE_CONNECTOR_ID", "demo-connector").strip()
+    or "demo-connector"
+)
+TASK_TRACKER_AGENTFORGE_BASIC_USERNAME = os.environ.get(
+    "TASK_TRACKER_AGENTFORGE_BASIC_USERNAME", "admin"
+)
+TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD = os.environ.get(
+    "TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD", "robot"
+)
+TASK_TRACKER_AGENTFORGE_BASE_URL = os.environ.get(
+    "TASK_TRACKER_AGENTFORGE_BASE_URL", ""
+).strip()
+TASK_TRACKER_AGENTFORGE_AUTH_REALM = (
+    os.environ.get("TASK_TRACKER_AGENTFORGE_AUTH_REALM", "agentforge").strip()
+    or "agentforge"
+)
+
+AGENTFORGE_DONE_STATUSES = {"completed", "failed", "cancelled"}
 
 ALLOWED_STATUSES = {"backlog", "ready", "in_progress", "done"}
 ALLOWED_TRANSITIONS = {
@@ -2002,6 +2041,439 @@ class PostgresTaskStore:
             "open_pauses": open_pauses,
         }
 
+    def _agentforge_request_hash(self, payload):
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _agentforge_resolve_idempotency(
+        self,
+        cur,
+        operation,
+        idempotency_key,
+        request_payload,
+    ):
+        request_hash = self._agentforge_request_hash(request_payload)
+        cur.execute(
+            """
+            INSERT INTO agentforge_idempotency (
+                operation,
+                idempotency_key,
+                request_hash
+            ) VALUES (%s, %s, %s)
+            ON CONFLICT (operation, idempotency_key) DO NOTHING
+            RETURNING operation
+            """,
+            (operation, idempotency_key, request_hash),
+        )
+        if cur.fetchone() is not None:
+            return {"state": "new", "request_hash": request_hash}
+
+        cur.execute(
+            """
+            SELECT request_hash, response_status, response_payload
+            FROM agentforge_idempotency
+            WHERE operation = %s
+                AND idempotency_key = %s
+            FOR UPDATE
+            """,
+            (operation, idempotency_key),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return {"state": "new", "request_hash": request_hash}
+
+        existing_hash = row[0]
+        response_status = row[1]
+        response_payload = row[2] if isinstance(row[2], dict) else {}
+        if existing_hash != request_hash:
+            return {
+                "state": "conflict",
+                "status": int(HTTPStatus.CONFLICT),
+                "payload": {
+                    "error": {
+                        "code": "idempotency_key_conflict",
+                        "message": "idempotency key is already used for a different request",
+                    }
+                },
+            }
+        if response_status is None:
+            return {
+                "state": "conflict",
+                "status": int(HTTPStatus.CONFLICT),
+                "payload": {
+                    "error": {
+                        "code": "idempotency_in_progress",
+                        "message": "idempotency key is currently in-flight",
+                    }
+                },
+            }
+        return {
+            "state": "replay",
+            "status": int(response_status),
+            "payload": response_payload,
+        }
+
+    def _agentforge_finalize_idempotency(
+        self,
+        cur,
+        operation,
+        idempotency_key,
+        status,
+        payload,
+    ):
+        cur.execute(
+            """
+            UPDATE agentforge_idempotency
+            SET response_status = %s,
+                response_payload = %s::jsonb,
+                updated_at = NOW()
+            WHERE operation = %s
+                AND idempotency_key = %s
+            """,
+            (
+                int(status),
+                json.dumps(payload or {}),
+                operation,
+                idempotency_key,
+            ),
+        )
+
+    def get_agentforge_ready_candidates(self, project_id, connector_id, limit):
+        del connector_id
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, project_key, title, description, priority, updated_at
+                    FROM tasks
+                    WHERE project_key = %s
+                        AND status = 'ready'
+                    ORDER BY priority DESC, updated_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (project_id, int(limit)),
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                "external_id": str(row[0]),
+                "project_id": row[1],
+                "title": row[2],
+                "description": row[3],
+                "priority": int(row[4] or 0),
+                "updated_at": row[5].isoformat() if row[5] is not None else None,
+            }
+            for row in rows
+        ]
+
+    def mark_agentforge_planned(
+        self,
+        *,
+        external_id,
+        project_id,
+        connector_id,
+        idempotency_key,
+    ):
+        request_payload = {
+            "external_id": external_id,
+            "project_id": project_id,
+            "connector_id": connector_id,
+        }
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                idempotency = self._agentforge_resolve_idempotency(
+                    cur,
+                    "planned",
+                    idempotency_key,
+                    request_payload,
+                )
+                if idempotency["state"] == "replay":
+                    return idempotency["status"], idempotency["payload"]
+                if idempotency["state"] == "conflict":
+                    return idempotency["status"], idempotency["payload"]
+
+                try:
+                    candidate_id = uuid.UUID(external_id)
+                except ValueError:
+                    status = int(HTTPStatus.NOT_FOUND)
+                    payload = {
+                        "error": {
+                            "code": "not_found",
+                            "message": "ready candidate not found",
+                        }
+                    }
+                    self._agentforge_finalize_idempotency(
+                        cur,
+                        "planned",
+                        idempotency_key,
+                        status,
+                        payload,
+                    )
+                    conn.commit()
+                    return status, payload
+
+                task_row = self._get_task_row(cur, external_id, for_update=True)
+                if task_row is None:
+                    status = int(HTTPStatus.NOT_FOUND)
+                    payload = {
+                        "error": {
+                            "code": "not_found",
+                            "message": "ready candidate not found",
+                        }
+                    }
+                elif task_row[1] != project_id:
+                    status = int(HTTPStatus.FORBIDDEN)
+                    payload = {
+                        "error": {
+                            "code": "forbidden",
+                            "message": "candidate does not belong to the requested project",
+                        }
+                    }
+                elif task_row[5] != "ready":
+                    status = int(HTTPStatus.CONFLICT)
+                    payload = {
+                        "error": {
+                            "code": "invalid_state",
+                            "message": "candidate is not in ready status",
+                        }
+                    }
+                else:
+                    cur.execute(
+                        """
+                        UPDATE tasks
+                        SET status = 'in_progress',
+                            assignee = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        RETURNING id, project_key, parent_task_id, title, description,
+                            status, priority, assignee, result_summary
+                        """,
+                        (connector_id, candidate_id),
+                    )
+                    updated_row = cur.fetchone()
+                    updated_task = self._row_to_task(updated_row)
+                    status = int(HTTPStatus.OK)
+                    payload = {
+                        "external_id": updated_task["id"],
+                        "project_id": project_id,
+                        "connector_id": connector_id,
+                        "status": "planned",
+                        "planned_at": datetime.utcnow().isoformat() + "Z",
+                    }
+                    self._emit_event(
+                        cur,
+                        "transition.approved",
+                        project_id,
+                        updated_task["id"],
+                        {
+                            "source": "agentforge",
+                            "from_status": "ready",
+                            "to_status": "in_progress",
+                        },
+                    )
+
+                self._agentforge_finalize_idempotency(
+                    cur,
+                    "planned",
+                    idempotency_key,
+                    status,
+                    payload,
+                )
+            conn.commit()
+        return status, payload
+
+    def mark_agentforge_done(
+        self,
+        *,
+        external_id,
+        project_id,
+        connector_id,
+        idempotency_key,
+        outcome_status,
+        attempts_used,
+        max_attempts,
+        summary,
+        error_code,
+        done_at,
+    ):
+        request_payload = {
+            "external_id": external_id,
+            "project_id": project_id,
+            "connector_id": connector_id,
+            "status": outcome_status,
+            "attempts_used": attempts_used,
+            "max_attempts": max_attempts,
+            "summary": summary,
+            "error_code": error_code,
+            "done_at": done_at,
+        }
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                idempotency = self._agentforge_resolve_idempotency(
+                    cur,
+                    "done",
+                    idempotency_key,
+                    request_payload,
+                )
+                if idempotency["state"] == "replay":
+                    return idempotency["status"], idempotency["payload"]
+                if idempotency["state"] == "conflict":
+                    return idempotency["status"], idempotency["payload"]
+
+                try:
+                    candidate_id = uuid.UUID(external_id)
+                except ValueError:
+                    status = int(HTTPStatus.NOT_FOUND)
+                    payload = {
+                        "error": {
+                            "code": "not_found",
+                            "message": "ready candidate not found",
+                        }
+                    }
+                    self._agentforge_finalize_idempotency(
+                        cur,
+                        "done",
+                        idempotency_key,
+                        status,
+                        payload,
+                    )
+                    conn.commit()
+                    return status, payload
+
+                task_row = self._get_task_row(cur, external_id, for_update=True)
+                if task_row is None:
+                    status = int(HTTPStatus.NOT_FOUND)
+                    payload = {
+                        "error": {
+                            "code": "not_found",
+                            "message": "ready candidate not found",
+                        }
+                    }
+                elif task_row[1] != project_id:
+                    status = int(HTTPStatus.FORBIDDEN)
+                    payload = {
+                        "error": {
+                            "code": "forbidden",
+                            "message": "candidate does not belong to the requested project",
+                        }
+                    }
+                else:
+                    cur.execute(
+                        """
+                        SELECT task_id
+                        FROM agentforge_task_results
+                        WHERE task_id = %s
+                        """,
+                        (candidate_id,),
+                    )
+                    existing_result = cur.fetchone()
+                    if task_row[5] == "done" and existing_result is not None:
+                        status = int(HTTPStatus.CONFLICT)
+                        payload = {
+                            "error": {
+                                "code": "already_done",
+                                "message": "candidate is already finalized",
+                            }
+                        }
+                    else:
+                        closed_pause_row = self._close_open_pause_if_any(
+                            cur,
+                            external_id,
+                            actor=connector_id,
+                            comment="auto-closed by agentforge done",
+                        )
+                        cur.execute(
+                            """
+                            UPDATE tasks
+                            SET status = 'done',
+                                result_summary = %s,
+                                completed_at = %s::timestamptz,
+                                updated_at = NOW()
+                            WHERE id = %s
+                            RETURNING id, project_key, parent_task_id, title, description,
+                                status, priority, assignee, result_summary
+                            """,
+                            (summary, done_at, candidate_id),
+                        )
+                        updated_row = cur.fetchone()
+                        updated_task = self._row_to_task(updated_row)
+                        cur.execute(
+                            """
+                            INSERT INTO agentforge_task_results (
+                                task_id,
+                                outcome_status,
+                                attempts_used,
+                                max_attempts,
+                                summary,
+                                error_code,
+                                done_at,
+                                connector_id
+                            ) VALUES (
+                                %s, %s, %s, %s, %s, %s, %s::timestamptz, %s
+                            )
+                            ON CONFLICT (task_id) DO UPDATE SET
+                                outcome_status = EXCLUDED.outcome_status,
+                                attempts_used = EXCLUDED.attempts_used,
+                                max_attempts = EXCLUDED.max_attempts,
+                                summary = EXCLUDED.summary,
+                                error_code = EXCLUDED.error_code,
+                                done_at = EXCLUDED.done_at,
+                                connector_id = EXCLUDED.connector_id,
+                                updated_at = NOW()
+                            """,
+                            (
+                                candidate_id,
+                                outcome_status,
+                                attempts_used,
+                                max_attempts,
+                                summary,
+                                error_code,
+                                done_at,
+                                connector_id,
+                            ),
+                        )
+                        status = int(HTTPStatus.OK)
+                        payload = {
+                            "external_id": updated_task["id"],
+                            "project_id": project_id,
+                            "connector_id": connector_id,
+                            "status": outcome_status,
+                            "attempts_used": attempts_used,
+                            "max_attempts": max_attempts,
+                            "summary": summary,
+                            "error_code": error_code,
+                            "done_at": done_at,
+                        }
+                        if closed_pause_row is not None:
+                            closed_pause = self._row_to_pause(closed_pause_row)
+                            self._emit_event(
+                                cur,
+                                "pause.resumed",
+                                project_id,
+                                updated_task["id"],
+                                {
+                                    "pause_id": closed_pause["id"],
+                                    "auto_closed": True,
+                                },
+                            )
+                        self._emit_event(
+                            cur,
+                            "task.completed",
+                            project_id,
+                            updated_task["id"],
+                            {"source": "agentforge", "status": outcome_status},
+                        )
+
+                self._agentforge_finalize_idempotency(
+                    cur,
+                    "done",
+                    idempotency_key,
+                    status,
+                    payload,
+                )
+            conn.commit()
+        return status, payload
+
     def get_events_since(self, cursor, limit=200):
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -2206,6 +2678,339 @@ def get_ui_updates(cursor, timeout=None):
         "cursor": int(events[-1]["cursor"]),
         "events": events,
     }
+
+
+def _header_value(headers, name):
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return None
+    return getter(name)
+
+
+def _is_agentforge_path(path):
+    parsed = urlparse(path)
+    return parsed.path == TASK_TRACKER_AGENTFORGE_API_PREFIX or parsed.path.startswith(
+        f"{TASK_TRACKER_AGENTFORGE_API_PREFIX}/"
+    )
+
+
+def _agentforge_auth_error(headers):
+    auth_header = _header_value(headers, "Authorization")
+    challenge_headers = {
+        "WWW-Authenticate": (
+            f'Basic realm="{TASK_TRACKER_AGENTFORGE_AUTH_REALM}", charset="UTF-8"'
+        )
+    }
+    if not isinstance(auth_header, str) or not auth_header.strip():
+        return (
+            HTTPStatus.UNAUTHORIZED,
+            {
+                "error": {
+                    "code": "unauthorized",
+                    "message": "basic authorization is required",
+                }
+            },
+            challenge_headers,
+        )
+
+    parts = auth_header.strip().split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "basic":
+        return (
+            HTTPStatus.UNAUTHORIZED,
+            {
+                "error": {
+                    "code": "unauthorized",
+                    "message": "basic authorization is required",
+                }
+            },
+            challenge_headers,
+        )
+
+    try:
+        decoded = base64.b64decode(parts[1], validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return (
+            HTTPStatus.UNAUTHORIZED,
+            {
+                "error": {
+                    "code": "unauthorized",
+                    "message": "basic authorization is required",
+                }
+            },
+            challenge_headers,
+        )
+
+    if ":" not in decoded:
+        return (
+            HTTPStatus.UNAUTHORIZED,
+            {
+                "error": {
+                    "code": "unauthorized",
+                    "message": "basic authorization is required",
+                }
+            },
+            challenge_headers,
+        )
+
+    username, password = decoded.split(":", 1)
+    if not (
+        hmac.compare_digest(username, TASK_TRACKER_AGENTFORGE_BASIC_USERNAME)
+        and hmac.compare_digest(password, TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD)
+    ):
+        return (
+            HTTPStatus.FORBIDDEN,
+            {
+                "error": {
+                    "code": "forbidden",
+                    "message": "invalid basic credentials",
+                }
+            },
+            {},
+        )
+
+    return None
+
+
+def _authorize_agentforge_route(path, headers):
+    if not _is_agentforge_path(path):
+        return None
+    auth_error = _agentforge_auth_error(headers)
+    if auth_error is None:
+        return None
+    status, payload, _ = auth_error
+    return status, payload
+
+
+def _normalize_required_text(value):
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def _parse_agentforge_limit(value):
+    if value is None:
+        return None, _error(
+            HTTPStatus.BAD_REQUEST,
+            "invalid_request",
+            "limit query parameter is required",
+        )
+    try:
+        limit = int(str(value))
+    except (TypeError, ValueError):
+        return None, _error(
+            HTTPStatus.UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "limit must be a positive integer",
+        )
+    if limit <= 0:
+        return None, _error(
+            HTTPStatus.UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "limit must be a positive integer",
+        )
+    return limit, None
+
+
+def _parse_agentforge_int(value, field_name, minimum):
+    if type(value) is not int:
+        raise ValueError(f"{field_name} must be an integer")
+    if value < minimum:
+        raise ValueError(f"{field_name} must be >= {minimum}")
+    return value
+
+
+def _parse_required_rfc3339(value, field_name):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a valid RFC3339 timestamp")
+    normalized = value.strip()
+    probe = normalized[:-1] + "+00:00" if normalized.endswith("Z") else normalized
+    try:
+        datetime.fromisoformat(probe)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a valid RFC3339 timestamp") from exc
+    return normalized
+
+
+def _agentforge_validate_project_and_connector(project_id, connector_id):
+    normalized_project_id = _normalize_required_text(project_id)
+    if normalized_project_id is None:
+        return None, None, _error(
+            HTTPStatus.BAD_REQUEST,
+            "invalid_request",
+            "project_id query parameter is required",
+        )
+    normalized_connector_id = _normalize_required_text(connector_id)
+    if normalized_connector_id is None:
+        return None, None, _error(
+            HTTPStatus.BAD_REQUEST,
+            "invalid_request",
+            "connector_id query parameter is required",
+        )
+
+    if normalized_project_id != TASK_TRACKER_AGENTFORGE_PROJECT_ID:
+        return None, None, _error(
+            HTTPStatus.FORBIDDEN,
+            "forbidden",
+            "project_id is not allowed",
+        )
+    if normalized_connector_id != TASK_TRACKER_AGENTFORGE_CONNECTOR_ID:
+        return None, None, _error(
+            HTTPStatus.FORBIDDEN,
+            "forbidden",
+            "connector_id is not allowed",
+        )
+    return normalized_project_id, normalized_connector_id, None
+
+
+def _agentforge_base_url(headers=None):
+    if TASK_TRACKER_AGENTFORGE_BASE_URL:
+        return TASK_TRACKER_AGENTFORGE_BASE_URL.rstrip("/")
+    forwarded_host = _header_value(headers, "X-Forwarded-Host")
+    host = _normalize_required_text(forwarded_host)
+    if host is None:
+        host = _normalize_required_text(_header_value(headers, "Host"))
+    if host is None:
+        host = f"127.0.0.1:{TASK_TRACKER_PORT}"
+    proto_value = _header_value(headers, "X-Forwarded-Proto")
+    proto = "http"
+    if isinstance(proto_value, str) and proto_value.strip():
+        proto = proto_value.split(",", 1)[0].strip() or "http"
+    return f"{proto}://{host}"
+
+
+def get_agentforge_config(headers=None):
+    base_url = _agentforge_base_url(headers=headers)
+    return HTTPStatus.OK, {
+        "protocol_version": TASK_TRACKER_AGENTFORGE_PROTOCOL_VERSION,
+        "auth_type": "basic",
+        "base_url": base_url,
+        "project_id": TASK_TRACKER_AGENTFORGE_PROJECT_ID,
+        "connector_id": TASK_TRACKER_AGENTFORGE_CONNECTOR_ID,
+        "paths": {
+            "config": TASK_TRACKER_AGENTFORGE_CONFIG_PATH,
+            "ready_candidates": TASK_TRACKER_AGENTFORGE_READY_CANDIDATES_PATH,
+            "planned": TASK_TRACKER_AGENTFORGE_PLANNED_PATH,
+            "done": TASK_TRACKER_AGENTFORGE_DONE_PATH,
+        },
+        "agentforge_variables": {
+            "AGENTFORGE_BRIDGE_BASE_URL": base_url,
+            "AGENTFORGE_PROJECT_ID": TASK_TRACKER_AGENTFORGE_PROJECT_ID,
+            "AGENTFORGE_CONNECTOR_ID": TASK_TRACKER_AGENTFORGE_CONNECTOR_ID,
+            "AGENTFORGE_BRIDGE_AUTH_TYPE": "basic",
+            "AGENTFORGE_BRIDGE_BASIC_USERNAME": TASK_TRACKER_AGENTFORGE_BASIC_USERNAME,
+            "AGENTFORGE_BRIDGE_BASIC_PASSWORD": TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD,
+        },
+    }
+
+
+def get_agentforge_ready_candidates(limit, project_id, connector_id):
+    limit_value, error = _parse_agentforge_limit(limit)
+    if error is not None:
+        return error
+    normalized_project_id, normalized_connector_id, error = (
+        _agentforge_validate_project_and_connector(project_id, connector_id)
+    )
+    if error is not None:
+        return error
+
+    candidates = get_runtime_store().get_agentforge_ready_candidates(
+        normalized_project_id,
+        normalized_connector_id,
+        limit_value,
+    )
+    if not candidates:
+        return HTTPStatus.NO_CONTENT, {}
+    return HTTPStatus.OK, {"candidates": candidates}
+
+
+def post_agentforge_planned(external_id, idempotency_key):
+    key = _normalize_required_text(idempotency_key)
+    if key is None:
+        return _error(
+            HTTPStatus.BAD_REQUEST,
+            "invalid_request",
+            "Idempotency-Key header is required",
+        )
+
+    status, payload = get_runtime_store().mark_agentforge_planned(
+        external_id=external_id,
+        project_id=TASK_TRACKER_AGENTFORGE_PROJECT_ID,
+        connector_id=TASK_TRACKER_AGENTFORGE_CONNECTOR_ID,
+        idempotency_key=key,
+    )
+    return HTTPStatus(status), payload
+
+
+def post_agentforge_done(external_id, payload, idempotency_key):
+    key = _normalize_required_text(idempotency_key)
+    if key is None:
+        return _error(
+            HTTPStatus.BAD_REQUEST,
+            "invalid_request",
+            "Idempotency-Key header is required",
+        )
+
+    outcome_status = payload.get("status")
+    if not isinstance(outcome_status, str) or outcome_status not in AGENTFORGE_DONE_STATUSES:
+        return _error(
+            HTTPStatus.UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "status must be one of completed, failed, cancelled",
+        )
+    try:
+        attempts_used = _parse_agentforge_int(payload.get("attempts_used"), "attempts_used", 0)
+        max_attempts = _parse_agentforge_int(payload.get("max_attempts"), "max_attempts", 1)
+        if attempts_used > max_attempts:
+            raise ValueError("attempts_used must be <= max_attempts")
+        done_at = _parse_required_rfc3339(payload.get("done_at"), "done_at")
+    except ValueError as exc:
+        return _error(
+            HTTPStatus.UNPROCESSABLE_ENTITY,
+            "validation_error",
+            str(exc),
+        )
+
+    summary = payload.get("summary")
+    if summary is not None and not isinstance(summary, str):
+        return _error(
+            HTTPStatus.UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "summary must be a string when provided",
+        )
+    error_code = payload.get("error_code")
+    if error_code is not None:
+        if not isinstance(error_code, str):
+            return _error(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "validation_error",
+                "error_code must be a string when provided",
+            )
+        if len(error_code.strip()) == 0:
+            return _error(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "validation_error",
+                "error_code must not be empty when provided",
+            )
+        error_code = error_code.strip()
+
+    status, response_payload = get_runtime_store().mark_agentforge_done(
+        external_id=external_id,
+        project_id=TASK_TRACKER_AGENTFORGE_PROJECT_ID,
+        connector_id=TASK_TRACKER_AGENTFORGE_CONNECTOR_ID,
+        idempotency_key=key,
+        outcome_status=outcome_status,
+        attempts_used=attempts_used,
+        max_attempts=max_attempts,
+        summary=summary,
+        error_code=error_code,
+        done_at=done_at,
+    )
+    return HTTPStatus(status), response_payload
 
 
 def patch_task(task_id, payload):
@@ -2653,9 +3458,19 @@ class TaskTrackerHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
-    def _send_json(self, status, payload):
-        body = json.dumps(payload).encode("utf-8")
+    def _send_json(self, status, payload, extra_headers=None):
+        if int(status) == int(HTTPStatus.NO_CONTENT):
+            self.send_response(status)
+            for header_name, header_value in (extra_headers or {}).items():
+                self.send_header(header_name, header_value)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        body = json.dumps(payload or {}).encode("utf-8")
         self.send_response(status)
+        for header_name, header_value in (extra_headers or {}).items():
+            self.send_header(header_name, header_value)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -2686,6 +3501,16 @@ class TaskTrackerHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as exc:
             raise ValueError("invalid json body") from exc
 
+    def _check_agentforge_auth(self):
+        if not _is_agentforge_path(self.path):
+            return True
+        auth_error = _agentforge_auth_error(self.headers)
+        if auth_error is None:
+            return True
+        status, payload, extra_headers = auth_error
+        self._send_json(status, payload, extra_headers=extra_headers)
+        return False
+
     def do_GET(self):
         ui_response = route_operational_ui(self.path)
         if ui_response is not None:
@@ -2693,10 +3518,16 @@ class TaskTrackerHandler(BaseHTTPRequestHandler):
             self._send_text(status, body, "text/html; charset=utf-8")
             return
 
-        status, payload = route_get(self.path)
+        if not self._check_agentforge_auth():
+            return
+
+        status, payload = route_get(self.path, headers=self.headers)
         self._send_json(status, payload)
 
     def do_POST(self):
+        if not self._check_agentforge_auth():
+            return
+
         try:
             body = self._read_json_body()
         except ValueError:
@@ -2708,7 +3539,7 @@ class TaskTrackerHandler(BaseHTTPRequestHandler):
             self._send_json(status, payload)
             return
 
-        status, payload = route_post(self.path, body)
+        status, payload = route_post(self.path, body, headers=self.headers)
         self._send_json(status, payload)
 
     def do_PATCH(self):
@@ -2723,7 +3554,7 @@ class TaskTrackerHandler(BaseHTTPRequestHandler):
             self._send_json(status, payload)
             return
 
-        status, payload = route_patch(self.path, body)
+        status, payload = route_patch(self.path, body, headers=self.headers)
         self._send_json(status, payload)
 
 
@@ -2731,10 +3562,22 @@ def create_server(host, port):
     return ThreadingHTTPServer((host, int(port)), TaskTrackerHandler)
 
 
-def route_get(path):
+def route_get(path, headers=None):
+    auth_error = _authorize_agentforge_route(path, headers)
+    if auth_error is not None:
+        return auth_error
+
     parsed = urlparse(path)
     if parsed.path == "/healthz":
         return HTTPStatus.OK, {"status": "ok"}
+    if parsed.path == TASK_TRACKER_AGENTFORGE_CONFIG_PATH:
+        return get_agentforge_config(headers=headers)
+    if parsed.path == TASK_TRACKER_AGENTFORGE_READY_CANDIDATES_PATH:
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        limit = query.get("limit", [None])[0]
+        project_id = query.get("project_id", [None])[0]
+        connector_id = query.get("connector_id", [None])[0]
+        return get_agentforge_ready_candidates(limit, project_id, connector_id)
     if parsed.path == "/api/v1/ui/snapshot":
         query = parse_qs(parsed.query, keep_blank_values=True)
         project_key = query.get("project_key", [None])[0]
@@ -2763,10 +3606,29 @@ def route_get(path):
     }
 
 
-def route_post(path, payload):
+def route_post(path, payload, headers=None):
+    auth_error = _authorize_agentforge_route(path, headers)
+    if auth_error is not None:
+        return auth_error
+
+    idempotency_key = _header_value(headers, "Idempotency-Key")
     parts = _path_parts(path)
     if parts == ["api", "v1", "tasks"]:
         return create_task(payload)
+
+    if (
+        len(parts) == 5
+        and parts[:3] == ["api", "agentforge", "ready-candidates"]
+        and parts[4] == "planned"
+    ):
+        return post_agentforge_planned(parts[3], idempotency_key)
+
+    if (
+        len(parts) == 5
+        and parts[:3] == ["api", "agentforge", "ready-candidates"]
+        and parts[4] == "done"
+    ):
+        return post_agentforge_done(parts[3], payload, idempotency_key)
 
     if len(parts) == 5 and parts[:3] == ["api", "v1", "tasks"] and parts[4] == "children":
         return create_child_task(parts[3], payload)
@@ -2816,7 +3678,11 @@ def route_post(path, payload):
     }
 
 
-def route_patch(path, payload):
+def route_patch(path, payload, headers=None):
+    auth_error = _authorize_agentforge_route(path, headers)
+    if auth_error is not None:
+        return auth_error
+
     parts = _path_parts(path)
     if len(parts) == 4 and parts[:3] == ["api", "v1", "tasks"]:
         return patch_task(parts[3], payload)

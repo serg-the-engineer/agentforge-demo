@@ -1,4 +1,6 @@
+import base64
 import importlib.util
+import hashlib
 import json
 import pathlib
 import threading
@@ -19,6 +21,8 @@ class FakePostgresRuntimeStore:
         self.transition_attempts = {}
         self.pauses = {}
         self.pause_answers = {}
+        self.agentforge_done = {}
+        self.agentforge_idempotency = {}
         self.events = []
         self._clock = 0
         self._event_cursor = 0
@@ -40,6 +44,8 @@ class FakePostgresRuntimeStore:
         self.transition_attempts = {}
         self.pauses = {}
         self.pause_answers = {}
+        self.agentforge_done = {}
+        self.agentforge_idempotency = {}
         self.events = []
         self._clock = 0
         self._event_cursor = 0
@@ -484,6 +490,232 @@ class FakePostgresRuntimeStore:
         events = [event for event in self.events if event["cursor"] > cursor]
         return [dict(event) for event in events[:limit]]
 
+    def _agentforge_request_hash(self, payload):
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _agentforge_idempotency_lookup(self, operation, idempotency_key, request_payload):
+        record = self.agentforge_idempotency.get((operation, idempotency_key))
+        if record is None:
+            return None
+
+        request_hash = self._agentforge_request_hash(request_payload)
+        if record["request_hash"] != request_hash:
+            return (
+                HTTPStatus.CONFLICT,
+                {
+                    "error": {
+                        "code": "idempotency_key_conflict",
+                        "message": "idempotency key is already used for a different request",
+                    }
+                },
+            )
+
+        return int(record["status"]), dict(record["payload"])
+
+    def _agentforge_idempotency_store(
+        self, operation, idempotency_key, request_payload, status, payload
+    ):
+        self.agentforge_idempotency[(operation, idempotency_key)] = {
+            "request_hash": self._agentforge_request_hash(request_payload),
+            "status": int(status),
+            "payload": dict(payload or {}),
+        }
+
+    def get_agentforge_ready_candidates(self, project_id, connector_id, limit):
+        del connector_id
+        with self._lock:
+            candidates = []
+            for task in self.tasks.values():
+                if task.get("project_key") != project_id:
+                    continue
+                if task.get("status") != "ready":
+                    continue
+                candidates.append(
+                    {
+                        "external_id": task["id"],
+                        "project_id": task["project_key"],
+                        "title": task["title"],
+                        "description": task.get("description"),
+                        "priority": int(task.get("priority") or 0),
+                        "updated_at": task.get("updated_at"),
+                    }
+                )
+            candidates.sort(
+                key=lambda item: (
+                    item["priority"],
+                    item.get("updated_at") or "",
+                    item["external_id"],
+                ),
+                reverse=True,
+            )
+            return [dict(item) for item in candidates[: int(limit)]]
+
+    def mark_agentforge_planned(
+        self, *, external_id, project_id, connector_id, idempotency_key
+    ):
+        request_payload = {
+            "external_id": external_id,
+            "project_id": project_id,
+            "connector_id": connector_id,
+        }
+        with self._lock:
+            replay = self._agentforge_idempotency_lookup(
+                "planned",
+                idempotency_key,
+                request_payload,
+            )
+            if replay is not None:
+                return replay
+
+            task = self.tasks.get(external_id)
+            if task is None:
+                status = HTTPStatus.NOT_FOUND
+                payload = {
+                    "error": {
+                        "code": "not_found",
+                        "message": "ready candidate not found",
+                    }
+                }
+            elif task.get("project_key") != project_id:
+                status = HTTPStatus.FORBIDDEN
+                payload = {
+                    "error": {
+                        "code": "forbidden",
+                        "message": "candidate does not belong to the requested project",
+                    }
+                }
+            elif task.get("status") != "ready":
+                status = HTTPStatus.CONFLICT
+                payload = {
+                    "error": {
+                        "code": "invalid_state",
+                        "message": "candidate is not in ready status",
+                    }
+                }
+            else:
+                task["status"] = "in_progress"
+                task["assignee"] = connector_id
+                task["updated_at"] = self._next_timestamp()
+                status = HTTPStatus.OK
+                payload = {
+                    "external_id": external_id,
+                    "project_id": project_id,
+                    "connector_id": connector_id,
+                    "status": "planned",
+                    "planned_at": task["updated_at"],
+                }
+                self._emit_event(
+                    "transition.approved",
+                    project_id,
+                    external_id,
+                    {"from_status": "ready", "to_status": "in_progress", "source": "agentforge"},
+                )
+
+            self._agentforge_idempotency_store(
+                "planned",
+                idempotency_key,
+                request_payload,
+                status,
+                payload,
+            )
+            return int(status), dict(payload)
+
+    def mark_agentforge_done(
+        self,
+        *,
+        external_id,
+        project_id,
+        connector_id,
+        idempotency_key,
+        outcome_status,
+        attempts_used,
+        max_attempts,
+        summary,
+        error_code,
+        done_at,
+    ):
+        request_payload = {
+            "external_id": external_id,
+            "project_id": project_id,
+            "connector_id": connector_id,
+            "status": outcome_status,
+            "attempts_used": attempts_used,
+            "max_attempts": max_attempts,
+            "summary": summary,
+            "error_code": error_code,
+            "done_at": done_at,
+        }
+        with self._lock:
+            replay = self._agentforge_idempotency_lookup(
+                "done",
+                idempotency_key,
+                request_payload,
+            )
+            if replay is not None:
+                return replay
+
+            task = self.tasks.get(external_id)
+            if task is None:
+                status = HTTPStatus.NOT_FOUND
+                payload = {
+                    "error": {
+                        "code": "not_found",
+                        "message": "ready candidate not found",
+                    }
+                }
+            elif task.get("project_key") != project_id:
+                status = HTTPStatus.FORBIDDEN
+                payload = {
+                    "error": {
+                        "code": "forbidden",
+                        "message": "candidate does not belong to the requested project",
+                    }
+                }
+            elif task.get("status") == "done" and external_id in self.agentforge_done:
+                status = HTTPStatus.CONFLICT
+                payload = {
+                    "error": {
+                        "code": "already_done",
+                        "message": "candidate is already finalized",
+                    }
+                }
+            else:
+                task["status"] = "done"
+                task["summary"] = summary
+                task["updated_at"] = self._next_timestamp()
+                done_payload = {
+                    "status": outcome_status,
+                    "attempts_used": attempts_used,
+                    "max_attempts": max_attempts,
+                    "summary": summary,
+                    "error_code": error_code,
+                    "done_at": done_at,
+                    "connector_id": connector_id,
+                }
+                self.agentforge_done[external_id] = done_payload
+                status = HTTPStatus.OK
+                payload = {
+                    "external_id": external_id,
+                    "project_id": project_id,
+                    **done_payload,
+                }
+                self._emit_event(
+                    "task.completed",
+                    project_id,
+                    external_id,
+                    {"source": "agentforge", "status": outcome_status},
+                )
+
+            self._agentforge_idempotency_store(
+                "done",
+                idempotency_key,
+                request_payload,
+                status,
+                payload,
+            )
+            return int(status), dict(payload)
+
 
 def load_server_module():
     if not MODULE_PATH.is_file():
@@ -507,6 +739,18 @@ class TaskTrackerRuntimeApiTests(unittest.TestCase):
         self.store = FakePostgresRuntimeStore()
         self.server.set_runtime_store(self.store)
         self.server.reset_runtime_store()
+        self.agentforge_username = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_BASIC_USERNAME", "admin"
+        )
+        self.agentforge_password = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD", "robot"
+        )
+        self.agentforge_project_id = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_PROJECT_ID", "project-http"
+        )
+        self.agentforge_connector_id = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_CONNECTOR_ID", "demo-connector"
+        )
 
     def _create_task(self, **overrides):
         payload = {"project_key": "project-a", "title": "Demo task"}
@@ -515,6 +759,25 @@ class TaskTrackerRuntimeApiTests(unittest.TestCase):
 
         self.assertEqual(201, int(status))
         return response["task"]
+
+    def _agentforge_headers(self, *, idempotency_key=None, username=None, password=None):
+        user = username if username is not None else getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_BASIC_USERNAME", "admin"
+        )
+        secret = password if password is not None else getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD", "robot"
+        )
+        encoded = base64.b64encode(f"{user}:{secret}".encode("utf-8")).decode("ascii")
+        headers = {"Authorization": f"Basic {encoded}"}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        return headers
+
+    def _agentforge_project_id(self):
+        return getattr(self.server, "TASK_TRACKER_AGENTFORGE_PROJECT_ID", "project-a")
+
+    def _agentforge_connector_id(self):
+        return getattr(self.server, "TASK_TRACKER_AGENTFORGE_CONNECTOR_ID", "demo-connector")
 
     def test_runtime_uses_postgres_hook_points(self):
         self.assertTrue(hasattr(self.server, "PostgresTaskStore"))
@@ -958,6 +1221,166 @@ class TaskTrackerRuntimeApiTests(unittest.TestCase):
         self.assertEqual(400, int(status))
         self.assertEqual("invalid_request", response["error"]["code"])
 
+    def test_agentforge_route_contract_for_config_ready_planned_done(self):
+        project_id = self._agentforge_project_id()
+        connector_id = self._agentforge_connector_id()
+        ready = self._create_task(project_key=project_id, title="AF ready", priority=88)
+        self.store.update_task(ready["id"], {"status": "ready"})
+
+        status, response = self.server.route_get(
+            "/api/agentforge/config",
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(200, int(status))
+        self.assertEqual("v1", response["protocol_version"])
+        self.assertEqual("basic", response["auth_type"])
+        self.assertEqual(project_id, response["project_id"])
+        self.assertEqual(connector_id, response["connector_id"])
+        self.assertEqual("/api/agentforge/config", response["paths"]["config"])
+
+        status, response = self.server.route_get(
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=1&project_id={project_id}&connector_id={connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(200, int(status))
+        self.assertEqual(1, len(response["candidates"]))
+        self.assertEqual(ready["id"], response["candidates"][0]["external_id"])
+
+        status, response = self.server.route_post(
+            f"/api/agentforge/ready-candidates/{ready['id']}/planned",
+            {},
+            headers=self._agentforge_headers(idempotency_key="af-plan-1"),
+        )
+        self.assertEqual(200, int(status))
+        self.assertEqual("planned", response["status"])
+
+        done_payload = {
+            "status": "completed",
+            "attempts_used": 1,
+            "max_attempts": 2,
+            "summary": "ok",
+            "error_code": None,
+            "done_at": "2026-03-04T12:00:00Z",
+        }
+        status, response = self.server.route_post(
+            f"/api/agentforge/ready-candidates/{ready['id']}/done",
+            done_payload,
+            headers=self._agentforge_headers(idempotency_key="af-done-1"),
+        )
+        self.assertEqual(200, int(status))
+        self.assertEqual("completed", response["status"])
+        self.assertEqual(1, response["attempts_used"])
+        self.assertEqual(2, response["max_attempts"])
+
+    def test_agentforge_route_auth_and_validation(self):
+        project_id = self._agentforge_project_id()
+        connector_id = self._agentforge_connector_id()
+        candidate = self._create_task(project_key=project_id, title="AF candidate", priority=42)
+        self.store.update_task(candidate["id"], {"status": "ready"})
+
+        status, response = self.server.route_get(
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=1&project_id={project_id}&connector_id={connector_id}"
+            ),
+        )
+        self.assertEqual(401, int(status))
+        self.assertEqual("unauthorized", response["error"]["code"])
+
+        status, response = self.server.route_get(
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=1&project_id={project_id}&connector_id={connector_id}"
+            ),
+            headers=self._agentforge_headers(username="bad", password="creds"),
+        )
+        self.assertEqual(403, int(status))
+        self.assertEqual("forbidden", response["error"]["code"])
+
+        status, response = self.server.route_get(
+            (
+                "/api/agentforge/ready-candidates"
+                f"?project_id={project_id}&connector_id={connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(400, int(status))
+        self.assertEqual("invalid_request", response["error"]["code"])
+
+        status, response = self.server.route_post(
+            f"/api/agentforge/ready-candidates/{candidate['id']}/planned",
+            {},
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(400, int(status))
+        self.assertEqual("invalid_request", response["error"]["code"])
+
+        status, response = self.server.route_post(
+            f"/api/agentforge/ready-candidates/{candidate['id']}/done",
+            {
+                "status": "unknown",
+                "attempts_used": 1,
+                "max_attempts": 1,
+                "summary": "x",
+                "error_code": None,
+                "done_at": "2026-03-04T12:00:00Z",
+            },
+            headers=self._agentforge_headers(idempotency_key="af-invalid-done"),
+        )
+        self.assertEqual(422, int(status))
+        self.assertEqual("validation_error", response["error"]["code"])
+
+    def test_agentforge_route_idempotency_and_ready_no_content(self):
+        project_id = self._agentforge_project_id()
+        connector_id = self._agentforge_connector_id()
+        high = self._create_task(project_key=project_id, title="High", priority=99)
+        mid = self._create_task(project_key=project_id, title="Mid", priority=40)
+        self.store.update_task(high["id"], {"status": "ready"})
+        self.store.update_task(mid["id"], {"status": "ready"})
+
+        status, response = self.server.route_get(
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=2&project_id={project_id}&connector_id={connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(200, int(status))
+        self.assertEqual(high["id"], response["candidates"][0]["external_id"])
+        self.assertEqual(mid["id"], response["candidates"][1]["external_id"])
+
+        planned_status, planned_response = self.server.route_post(
+            f"/api/agentforge/ready-candidates/{high['id']}/planned",
+            {},
+            headers=self._agentforge_headers(idempotency_key="plan-once"),
+        )
+        self.assertEqual(200, int(planned_status))
+        replay_status, replay_response = self.server.route_post(
+            f"/api/agentforge/ready-candidates/{high['id']}/planned",
+            {},
+            headers=self._agentforge_headers(idempotency_key="plan-once"),
+        )
+        self.assertEqual(200, int(replay_status))
+        self.assertEqual(planned_response, replay_response)
+
+        self.server.route_post(
+            f"/api/agentforge/ready-candidates/{mid['id']}/planned",
+            {},
+            headers=self._agentforge_headers(idempotency_key="plan-mid"),
+        )
+        status, response = self.server.route_get(
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=10&project_id={project_id}&connector_id={connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(204, int(status))
+        self.assertEqual({}, response)
+
 
 class TaskTrackerRuntimeHttpApiTests(unittest.TestCase):
     def setUp(self):
@@ -965,6 +1388,18 @@ class TaskTrackerRuntimeHttpApiTests(unittest.TestCase):
         self.store = FakePostgresRuntimeStore()
         self.server.set_runtime_store(self.store)
         self.server.reset_runtime_store()
+        self.agentforge_username = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_BASIC_USERNAME", "admin"
+        )
+        self.agentforge_password = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD", "robot"
+        )
+        self.agentforge_project_id = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_PROJECT_ID", "project-http"
+        )
+        self.agentforge_connector_id = getattr(
+            self.server, "TASK_TRACKER_AGENTFORGE_CONNECTOR_ID", "demo-connector"
+        )
 
         try:
             self.httpd = self.server.create_server("127.0.0.1", 0)
@@ -980,34 +1415,45 @@ class TaskTrackerRuntimeHttpApiTests(unittest.TestCase):
         self.httpd.server_close()
         self.thread.join(timeout=2)
 
-    def _request(self, method, path, payload=None):
+    def _request(self, method, path, payload=None, headers=None):
         data = None
-        headers = {}
+        request_headers = dict(headers or {})
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
-            headers["Content-Type"] = "application/json"
+            request_headers["Content-Type"] = "application/json"
 
         req = request.Request(
-            f"{self.base_url}{path}", data=data, headers=headers, method=method
+            f"{self.base_url}{path}",
+            data=data,
+            headers=request_headers,
+            method=method,
         )
 
         try:
             with request.urlopen(req) as response:
                 body = response.read().decode("utf-8")
+                if not body:
+                    return response.getcode(), {}
                 return response.getcode(), json.loads(body)
         except error.HTTPError as exc:
             body = exc.read().decode("utf-8")
+            exc.close()
+            if not body:
+                return exc.code, {}
             return exc.code, json.loads(body)
 
-    def _request_raw(self, method, path, payload=None):
+    def _request_raw(self, method, path, payload=None, headers=None):
         data = None
-        headers = {}
+        request_headers = dict(headers or {})
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
-            headers["Content-Type"] = "application/json"
+            request_headers["Content-Type"] = "application/json"
 
         req = request.Request(
-            f"{self.base_url}{path}", data=data, headers=headers, method=method
+            f"{self.base_url}{path}",
+            data=data,
+            headers=request_headers,
+            method=method,
         )
 
         try:
@@ -1016,7 +1462,32 @@ class TaskTrackerRuntimeHttpApiTests(unittest.TestCase):
                 return response.getcode(), response.headers.get("Content-Type", ""), body
         except error.HTTPError as exc:
             body = exc.read().decode("utf-8")
+            exc.close()
             return exc.code, exc.headers.get("Content-Type", ""), body
+
+    def _agentforge_headers(self, *, idempotency_key=None, username=None, password=None):
+        user = username if username is not None else self.agentforge_username
+        secret = password if password is not None else self.agentforge_password
+        token = base64.b64encode(f"{user}:{secret}".encode("utf-8")).decode("ascii")
+        headers = {"Authorization": f"Basic {token}"}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        return headers
+
+    def _create_ready_task(self, title, priority):
+        status, response = self._request(
+            "POST",
+            "/api/v1/tasks",
+            {
+                "project_key": self.agentforge_project_id,
+                "title": title,
+                "priority": priority,
+            },
+        )
+        self.assertEqual(HTTPStatus.CREATED, status)
+        task_id = response["task"]["id"]
+        self.store.update_task(task_id, {"status": "ready"})
+        return task_id
 
     def test_http_t05_endpoints(self):
         status, response = self._request(
@@ -1338,6 +1809,283 @@ class TaskTrackerRuntimeHttpApiTests(unittest.TestCase):
         self.assertEqual(HTTPStatus.OK, status)
         self.assertGreaterEqual(len(response["events"]), 1)
         self.assertEqual("task.created", response["events"][0]["event_type"])
+
+    def test_http_agentforge_requires_basic_auth(self):
+        status, response = self._request(
+            "GET",
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=1&project_id={self.agentforge_project_id}"
+                f"&connector_id={self.agentforge_connector_id}"
+            ),
+        )
+        self.assertEqual(HTTPStatus.UNAUTHORIZED, status)
+        self.assertEqual("unauthorized", response["error"]["code"])
+
+        status, response = self._request(
+            "GET",
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=1&project_id={self.agentforge_project_id}"
+                f"&connector_id={self.agentforge_connector_id}"
+            ),
+            headers=self._agentforge_headers(username="wrong", password="creds"),
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, status)
+        self.assertEqual("forbidden", response["error"]["code"])
+
+    def test_http_agentforge_config_contract(self):
+        status, response = self._request(
+            "GET",
+            "/api/agentforge/config",
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(HTTPStatus.OK, status)
+        self.assertEqual("v1", response["protocol_version"])
+        self.assertEqual("basic", response["auth_type"])
+        self.assertEqual(self.agentforge_project_id, response["project_id"])
+        self.assertEqual(self.agentforge_connector_id, response["connector_id"])
+        self.assertIn("base_url", response)
+        self.assertTrue(response["base_url"].startswith("http://"))
+        self.assertEqual(
+            "/api/agentforge/config",
+            response["paths"]["config"],
+        )
+        self.assertEqual(
+            "/api/agentforge/ready-candidates",
+            response["paths"]["ready_candidates"],
+        )
+        self.assertEqual(
+            "/api/agentforge/ready-candidates/{external_id}/planned",
+            response["paths"]["planned"],
+        )
+        self.assertEqual(
+            "/api/agentforge/ready-candidates/{external_id}/done",
+            response["paths"]["done"],
+        )
+        variables = response["agentforge_variables"]
+        self.assertEqual(
+            response["base_url"],
+            variables["AGENTFORGE_BRIDGE_BASE_URL"],
+        )
+        self.assertEqual(
+            self.agentforge_username,
+            variables["AGENTFORGE_BRIDGE_BASIC_USERNAME"],
+        )
+        self.assertEqual(
+            self.agentforge_password,
+            variables["AGENTFORGE_BRIDGE_BASIC_PASSWORD"],
+        )
+
+    def test_http_agentforge_ready_candidates_ordering_and_no_content_branch(self):
+        task_high = self._create_ready_task("High", 90)
+        task_mid = self._create_ready_task("Mid", 60)
+        task_low = self._create_ready_task("Low", 20)
+        _ = task_low
+
+        status, response = self._request(
+            "GET",
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=2&project_id={self.agentforge_project_id}"
+                f"&connector_id={self.agentforge_connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(HTTPStatus.OK, status)
+        self.assertEqual(2, len(response["candidates"]))
+        self.assertEqual(task_high, response["candidates"][0]["external_id"])
+        self.assertEqual(task_mid, response["candidates"][1]["external_id"])
+
+        planned_ids = [task_high, task_mid, task_low]
+        for index, task_id in enumerate(planned_ids, start=1):
+            planned_status, _ = self._request(
+                "POST",
+                f"/api/agentforge/ready-candidates/{task_id}/planned",
+                headers=self._agentforge_headers(idempotency_key=f"planned-{index}"),
+            )
+            self.assertEqual(HTTPStatus.OK, planned_status)
+
+        status, _ = self._request(
+            "GET",
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=5&project_id={self.agentforge_project_id}"
+                f"&connector_id={self.agentforge_connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(HTTPStatus.NO_CONTENT, status)
+
+    def test_http_agentforge_ready_candidates_query_validation(self):
+        status, response = self._request(
+            "GET",
+            (
+                "/api/agentforge/ready-candidates"
+                f"?project_id={self.agentforge_project_id}"
+                f"&connector_id={self.agentforge_connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, status)
+        self.assertEqual("invalid_request", response["error"]["code"])
+
+        status, response = self._request(
+            "GET",
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=zero&project_id={self.agentforge_project_id}"
+                f"&connector_id={self.agentforge_connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(HTTPStatus.UNPROCESSABLE_ENTITY, status)
+        self.assertEqual("validation_error", response["error"]["code"])
+
+    def test_http_agentforge_planned_idempotency_and_visibility(self):
+        task_id = self._create_ready_task("Planned candidate", 80)
+        headers = self._agentforge_headers(idempotency_key="plan-once")
+
+        first_status, first_response = self._request(
+            "POST",
+            f"/api/agentforge/ready-candidates/{task_id}/planned",
+            headers=headers,
+        )
+        self.assertEqual(HTTPStatus.OK, first_status)
+        self.assertEqual("planned", first_response["status"])
+
+        second_status, second_response = self._request(
+            "POST",
+            f"/api/agentforge/ready-candidates/{task_id}/planned",
+            headers=headers,
+        )
+        self.assertEqual(HTTPStatus.OK, second_status)
+        self.assertEqual(first_response, second_response)
+
+        status, _ = self._request(
+            "GET",
+            (
+                "/api/agentforge/ready-candidates"
+                f"?limit=5&project_id={self.agentforge_project_id}"
+                f"&connector_id={self.agentforge_connector_id}"
+            ),
+            headers=self._agentforge_headers(),
+        )
+        self.assertEqual(HTTPStatus.NO_CONTENT, status)
+
+    def test_http_agentforge_planned_concurrency_is_deterministic(self):
+        task_id = self._create_ready_task("Race candidate", 77)
+        barrier = threading.Barrier(3)
+        results = []
+        failures = []
+        lock = threading.Lock()
+
+        def worker(key):
+            try:
+                barrier.wait(timeout=2)
+                status, payload = self._request(
+                    "POST",
+                    f"/api/agentforge/ready-candidates/{task_id}/planned",
+                    headers=self._agentforge_headers(idempotency_key=key),
+                )
+                with lock:
+                    results.append((status, payload))
+            except Exception as exc:  # pragma: no cover
+                with lock:
+                    failures.append(exc)
+
+        left = threading.Thread(target=worker, args=("race-a",), daemon=True)
+        right = threading.Thread(target=worker, args=("race-b",), daemon=True)
+        left.start()
+        right.start()
+        barrier.wait(timeout=2)
+        left.join(timeout=3)
+        right.join(timeout=3)
+
+        self.assertEqual([], failures)
+        self.assertEqual(2, len(results))
+        statuses = sorted(status for status, _ in results)
+        self.assertEqual([HTTPStatus.OK, HTTPStatus.CONFLICT], statuses)
+
+    def test_http_agentforge_done_contract_and_idempotency(self):
+        task_id = self._create_ready_task("Done candidate", 75)
+        planned_status, _ = self._request(
+            "POST",
+            f"/api/agentforge/ready-candidates/{task_id}/planned",
+            headers=self._agentforge_headers(idempotency_key="done-pre-plan"),
+        )
+        self.assertEqual(HTTPStatus.OK, planned_status)
+
+        done_payload = {
+            "status": "completed",
+            "attempts_used": 1,
+            "max_attempts": 3,
+            "summary": "all checks passed",
+            "error_code": None,
+            "done_at": "2026-03-04T18:00:00Z",
+        }
+        headers = self._agentforge_headers(idempotency_key="done-once")
+        first_status, first_response = self._request(
+            "POST",
+            f"/api/agentforge/ready-candidates/{task_id}/done",
+            payload=done_payload,
+            headers=headers,
+        )
+        self.assertEqual(HTTPStatus.OK, first_status)
+        self.assertEqual("completed", first_response["status"])
+        self.assertEqual(1, first_response["attempts_used"])
+        self.assertEqual(3, first_response["max_attempts"])
+        self.assertEqual("all checks passed", first_response["summary"])
+        self.assertEqual("2026-03-04T18:00:00Z", first_response["done_at"])
+
+        second_status, second_response = self._request(
+            "POST",
+            f"/api/agentforge/ready-candidates/{task_id}/done",
+            payload=done_payload,
+            headers=headers,
+        )
+        self.assertEqual(HTTPStatus.OK, second_status)
+        self.assertEqual(first_response, second_response)
+
+    def test_http_agentforge_done_validation_and_errors(self):
+        task_id = self._create_ready_task("Done invalid", 55)
+        self._request(
+            "POST",
+            f"/api/agentforge/ready-candidates/{task_id}/planned",
+            headers=self._agentforge_headers(idempotency_key="done-invalid-plan"),
+        )
+
+        status, response = self._request(
+            "POST",
+            f"/api/agentforge/ready-candidates/{task_id}/done",
+            payload={
+                "status": "unknown",
+                "attempts_used": 1,
+                "max_attempts": 1,
+                "summary": "n/a",
+                "error_code": None,
+                "done_at": "2026-03-04T18:00:00Z",
+            },
+            headers=self._agentforge_headers(idempotency_key="done-invalid"),
+        )
+        self.assertEqual(HTTPStatus.UNPROCESSABLE_ENTITY, status)
+        self.assertEqual("validation_error", response["error"]["code"])
+
+        status, response = self._request(
+            "POST",
+            "/api/agentforge/ready-candidates/00000000-0000-0000-0000-000000000000/done",
+            payload={
+                "status": "failed",
+                "attempts_used": 1,
+                "max_attempts": 1,
+                "summary": "failed",
+                "error_code": "runtime_error",
+                "done_at": "2026-03-04T18:00:00Z",
+            },
+            headers=self._agentforge_headers(idempotency_key="done-missing"),
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, status)
+        self.assertEqual("not_found", response["error"]["code"])
 
     def test_http_operational_ui_page_served(self):
         status, content_type, body = self._request_raw(

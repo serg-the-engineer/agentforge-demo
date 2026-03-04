@@ -128,6 +128,10 @@ services:
       TASK_TRACKER_PORT: "9102"
       TASK_TRACKER_DATABASE_URL: postgresql://task_tracker:task_tracker@task-tracker-db:5432/task_tracker
       TASK_TRACKER_DB_DSN: host=task-tracker-db port=5432 dbname=task_tracker user=task_tracker password=task_tracker
+      TASK_TRACKER_AGENTFORGE_PROJECT_ID: demo
+      TASK_TRACKER_AGENTFORGE_CONNECTOR_ID: demo-connector
+      TASK_TRACKER_AGENTFORGE_BASIC_USERNAME: admin
+      TASK_TRACKER_AGENTFORGE_BASIC_PASSWORD: robot
     expose:
       - "9102"
     ports:

@@ -264,6 +264,47 @@ Task summary payload for queues contains:
   - If newer events exist, returns immediately with `200 OK` and `{ "cursor": <int>, "events": [...] }`.
   - If no events before timeout, returns `200 OK` with empty `events` and unchanged cursor.
 
+### AgentForge Bridge (`v1`)
+
+Bridge base path: `/api/agentforge`
+
+Authentication:
+
+- only HTTP Basic auth is allowed,
+- every `/api/agentforge/*` request without valid Basic credentials is rejected.
+
+Configuration endpoint:
+
+- `GET /api/agentforge/config`
+  - `200 OK`: returns `protocol_version`, `auth_type`, `base_url`,
+    `project_id`, `connector_id`, relative `paths`, and
+    `agentforge_variables` for quick connector setup.
+
+Ready queue endpoint:
+
+- `GET /api/agentforge/ready-candidates?limit=<n>&project_id=<id>&connector_id=<id>`
+  - required query params: `limit`, `project_id`, `connector_id`
+  - strict sort: highest project task priority first (`priority DESC`)
+  - `200 OK`: `{ "candidates": [...] }`
+  - `204 No Content`: no ready candidates
+
+Planned endpoint:
+
+- `POST /api/agentforge/ready-candidates/{external_id}/planned`
+  - required header: `Idempotency-Key`
+  - idempotent by key (same key + same request => same logical result)
+  - successful plan moves candidate out of `ready` (until explicit requeue)
+  - success statuses: `200|201|204`; duplicate conflict may be `409`
+
+Done endpoint:
+
+- `POST /api/agentforge/ready-candidates/{external_id}/done`
+  - required header: `Idempotency-Key`
+  - body `status` must be one of: `completed|failed|cancelled`
+  - stores `attempts_used`, `max_attempts`, `summary`, `error_code`, `done_at`
+  - idempotent by key with the same rules as `planned`
+  - success statuses: `200|201|204`; duplicate conflict may be `409`
+
 ## Concurrency and Transaction Rules
 
 1. All mutating endpoints run in a DB transaction.

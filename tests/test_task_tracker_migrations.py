@@ -76,7 +76,10 @@ class TaskTrackerSchemaMigrationTests(unittest.TestCase):
             f"missing required file: {CORE_MIGRATION_PATH}",
         )
 
-        sql = CORE_MIGRATION_PATH.read_text(encoding="utf-8").lower()
+        sql = "\n".join(
+            path.read_text(encoding="utf-8").lower()
+            for path in sorted(MIGRATIONS_DIR.glob("*.sql"))
+        )
 
         required_markers = (
             "create table if not exists projects",
@@ -87,12 +90,15 @@ class TaskTrackerSchemaMigrationTests(unittest.TestCase):
             "create table if not exists pauses",
             "create table if not exists pause_answers",
             "create table if not exists events",
+            "create table if not exists agentforge_idempotency",
+            "create table if not exists agentforge_task_results",
             "check (status in ('backlog', 'ready', 'in_progress', 'done'))",
             "check (gate_type in ('auto', 'manual'))",
             "bigserial primary key",
             "create unique index if not exists idx_transition_attempts_one_pending_per_task",
             "create unique index if not exists idx_pauses_one_open_per_task",
             "where closed_at is null",
+            "create unique index if not exists idx_agentforge_idempotency_operation_key",
         )
 
         for marker in required_markers:

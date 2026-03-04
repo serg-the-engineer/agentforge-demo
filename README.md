@@ -35,6 +35,25 @@ Delivery tracking for this project uses `task-tracker` from `task-tracker/`.
 - external demo route `/dev/tasks` points to Task Tracker UI/API through `web`,
 - `beads-ui` and `beads-dolt` remain available for compatibility access only and are exposed via `/dev/beads`.
 
+## AgentForge Protocol v1 Bridge
+
+Task Tracker exposes AgentForge protocol `v1` routes under `/api/agentforge`:
+
+- `GET /api/agentforge/config`
+- `GET /api/agentforge/ready-candidates`
+- `POST /api/agentforge/ready-candidates/{external_id}/planned`
+- `POST /api/agentforge/ready-candidates/{external_id}/done`
+
+All `/api/agentforge/*` endpoints require HTTP Basic auth.
+
+### Как подключить AgentForge через `/api/agentforge/config`
+
+1. Выполните `GET /api/agentforge/config` через demo ingress с Basic auth:
+   `curl -sS -u admin:robot https://<demo-host>/dev/tasks/api/agentforge/config`
+2. Возьмите из ответа `base_url`, `project_id`, `connector_id`, `paths`, `agentforge_variables`.
+3. Настройте AgentForge connector на `protocol_version=v1`, `auth_type=basic`,
+   и используйте относительные пути из `paths`.
+
 ## Fixed Compose Contract
 
 The compose file is intentionally frozen. Future demo work should change application code, not infrastructure shape.

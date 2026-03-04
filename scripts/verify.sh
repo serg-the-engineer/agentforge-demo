@@ -196,6 +196,9 @@ for marker in (
 for marker in (
     "## Stack",
     "## Task Tracking Workflow",
+    "## AgentForge Protocol v1 Bridge",
+    "/api/agentforge/config",
+    "Как подключить AgentForge через `/api/agentforge/config`",
     "## Fixed Compose Contract",
     "## Standalone Host Deployment",
     "`/dev/tasks` -> `task-tracker:9102`",
@@ -256,6 +259,12 @@ for marker in (
     "POST /api/v1/transitions/{attempt_id}/reject",
     "GET /api/v1/ui/snapshot",
     "GET /api/v1/ui/updates?cursor=<cursor>&timeout=<seconds>",
+    "### AgentForge Bridge (`v1`)",
+    "GET /api/agentforge/config",
+    "GET /api/agentforge/ready-candidates",
+    "POST /api/agentforge/ready-candidates/{external_id}/planned",
+    "POST /api/agentforge/ready-candidates/{external_id}/done",
+    "HTTP Basic auth",
 ):
     if marker not in task_tracker_spec_text:
         raise SystemExit(f"docs/task-tracker-spec.md missing contract marker: {marker}")
@@ -264,6 +273,11 @@ for marker in (
     "/healthz",
     '"status": "ok"',
     "create_server(",
+    'TASK_TRACKER_AGENTFORGE_API_PREFIX = "/api/agentforge"',
+    "TASK_TRACKER_AGENTFORGE_CONFIG_PATH",
+    "TASK_TRACKER_AGENTFORGE_READY_CANDIDATES_PATH",
+    "post_agentforge_planned",
+    "post_agentforge_done",
 ):
     if marker not in task_tracker_server_text:
         raise SystemExit(f"task-tracker/server.py missing contract marker: {marker}")
@@ -279,6 +293,11 @@ for marker in (
 for marker in (
     "# Task Tracker Sidecar (T02 Scaffold)",
     "GET /healthz",
+    "## T13: AgentForge Bridge Protocol `v1`",
+    "GET /api/agentforge/config",
+    "GET /api/agentforge/ready-candidates",
+    "Idempotency-Key",
+    "Как подключить AgentForge через `/api/agentforge/config`",
     "## T12: Sidecar Packaging and Usage",
     "### Compose snippet",
     "task-tracker-db:",
