@@ -1,8 +1,12 @@
-.PHONY: help beads-init verify-fast verify verify-ci lint-static lint-hygiene lint-contract test-unit
+.PHONY: help task-tracker-health task-tracker-snapshot verify-fast verify verify-ci lint-static lint-hygiene lint-contract test-unit
+
+TASK_TRACKER_BASE_URL ?= http://127.0.0.1:9102
+TASK_TRACKER_PROJECT_KEY ?= demo
 
 help:
 	@printf '%s\n' \
-		'beads-init     attach this checkout to the shared Beads backend and seed workflow files' \
+		'task-tracker-health   check task-tracker health endpoint' \
+		'task-tracker-snapshot fetch task-tracker snapshot for project key' \
 		'verify-fast    quick local demo contour' \
 		'verify         full local demo contour before handoff or review' \
 		'verify-ci      CI-grade alias (currently mirrors verify)' \
@@ -11,8 +15,11 @@ help:
 		'lint-contract  fixed runtime contract checks' \
 		'test-unit      focused stdlib unit tests'
 
-beads-init:
-	@sh ./scripts/beads_shared_init.sh
+task-tracker-health:
+	@curl -sS "$(TASK_TRACKER_BASE_URL)/healthz"
+
+task-tracker-snapshot:
+	@curl -sS "$(TASK_TRACKER_BASE_URL)/api/v1/ui/snapshot?project_key=$(TASK_TRACKER_PROJECT_KEY)"
 
 verify-fast: lint-static lint-hygiene test-unit
 

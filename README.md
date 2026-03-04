@@ -8,8 +8,8 @@ The runtime topology is fixed:
 
 - `web`: `nginx`, listens on `8081`, serves static files and proxies `/api/`
 - `api`: tiny Python API, listens on `9001`
-- `beads-dolt`: shared Beads Dolt backend, listens on `3306` internally and binds `127.0.0.1:3307` on the host
-- `beads-ui`: Beads task UI, installed from `npm` in a local image, listens on `8080` internally and is proxied via `web`
+- `beads-dolt`: shared Beads Dolt backend kept for compatibility access, listens on `3306` internally and binds `127.0.0.1:3307` on the host
+- `beads-ui`: Beads UI kept for compatibility access, installed from `npm` in a local image, listens on `8080` internally and is proxied via `web`
 - `db`: Postgres, listens on `5433`
 - `redis`: auxiliary Redis instance, listens on `6380`
 
@@ -22,6 +22,15 @@ The current API exposes:
 - `POST /api/state`
 
 The frontend uses that API to keep a shared "Server Best" score.
+
+## Task Tracking Workflow
+
+Delivery tracking for this project uses `task-tracker` from `task-tracker/`.
+
+- source of truth for active work is Task Tracker (`/ui` and `/api/v1/*`),
+- default local UI: [http://127.0.0.1:9102/ui?project_key=demo](http://127.0.0.1:9102/ui?project_key=demo),
+- quickstart and runbook live in `task-tracker/README.md`,
+- `beads-ui` and `beads-dolt` remain available for compatibility access only and are not the primary delivery tracker.
 
 ## Fixed Compose Contract
 
@@ -86,17 +95,19 @@ This demo follows the same delivery discipline as the main repository, adapted t
 
 - use TDD for behavior changes by adding or updating the narrowest automated check before implementation,
 - run `make verify-fast` after each small implementation slice,
-- run `make verify` before handoff, review, or `review_approval`,
+- run `make verify` before handoff or review,
 - use `make verify-ci` as the CI-grade alias; it currently mirrors `make verify` until the demo moves into its own repository,
+- keep task lifecycle, approvals, and blockers in Task Tracker (`task-tracker/README.md`),
 - keep changes small and single-purpose so they can be reviewed in one pass.
 
 ## Local Verification Contract
 
 The demo now exposes stable verification entrypoints in its local `Makefile`:
 
-- `make beads-init`: attach the current checkout to the shared Beads backend and seed the demo workflow files,
+- `make task-tracker-health`: check local task-tracker health endpoint,
+- `make task-tracker-snapshot`: inspect current Task Tracker queues for `TASK_TRACKER_PROJECT_KEY` (defaults to `demo`),
 - `make verify-fast`: quick local contour for small iterations,
-- `make verify`: full local contour before review or `review_approval`,
+- `make verify`: full local contour before review or handoff,
 - `make verify-ci`: CI-grade alias with the same blocking semantics,
 - `make lint-static`: syntax and required-file checks for the Python API and static assets,
 - `make lint-hygiene`: blocks placeholder markers and unfinished notes,
@@ -109,7 +120,7 @@ A failing applicable check blocks merge. Review output does not replace green ve
 
 The sections above are the authoritative architecture contract for the embedded demo while it still lives inside the main AgentForge repository.
 
-- Any change to the fixed compose contract, shared ingress alias, or Change Request sequence must update this `README.md`, `AGENTS.md`, and the seeded Beads formula in the same change set.
+- Any change to the fixed compose contract, shared ingress alias, or task-tracking workflow contract must update this `README.md`, `AGENTS.md`, and the relevant `task-tracker` docs in the same change set.
 - Changes that revise a long-lived boundary or invariant should also update the parent repository architecture records (`docs/ARCHITECTURE.md`, `docs/adr/`, or `docs/agent_decisions.md`) before merge.
 - Deferred follow-up work is not an acceptable substitute for a failed blocking verification step.
 
@@ -129,7 +140,8 @@ docker compose up --build -d
 ```
 
 The first start now also builds the local `beads-ui` image, creates `./.beads-host/dolt` for the shared Beads backend, and attaches `beads-ui` to it through the project checkout.
-Host-side agents can connect directly with `make beads-init`. Remote agents should use an SSH tunnel to `127.0.0.1:3307` first.
+Task Tracker setup and operations are documented in `task-tracker/README.md`.
+Remote access to the Beads backend still uses an SSH tunnel to `127.0.0.1:3307`.
 
 ## CI/CD Contract
 

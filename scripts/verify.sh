@@ -162,6 +162,8 @@ for marker in (
     "Use TDD for demo changes",
     "`tests/test_api_server.py`",
     "`scripts/verify.sh`",
+    "Use task-tracker as the source of truth for delivery work",
+    "`task-tracker/README.md`",
     "`make verify-fast`",
     "`make verify`",
 ):
@@ -170,8 +172,12 @@ for marker in (
 
 for marker in (
     "## Stack",
+    "## Task Tracking Workflow",
     "## Fixed Compose Contract",
     "## Local Delivery Workflow",
+    "`task-tracker/README.md`",
+    "`make task-tracker-health`",
+    "`make task-tracker-snapshot`",
     "`make verify-fast`",
     "`make verify`",
     "`make verify-ci`",
@@ -181,6 +187,8 @@ for marker in (
         raise SystemExit(f"README.md missing delivery marker: {marker}")
 
 for target in (
+    "task-tracker-health",
+    "task-tracker-snapshot",
     "verify-fast",
     "verify",
     "verify-ci",
