@@ -1,12 +1,12 @@
 # demo-agentforge
 
-Standalone demo project for AgentForge. It is intended to run only in the target environment as its own compose project, next to the main AgentForge stack.
+Standalone demo project for AgentForge. It runs as an independent compose project and does not require the main AgentForge stack on the same host.
 
 ## Stack
 
 The runtime topology is fixed:
 
-- `web`: `nginx`, listens on `8081`, serves static files and proxies `/api/`
+- `web`: `nginx`, listens on `8081`, binds `8081` on the host, serves static files, proxies `/api/`, and protects public access with HTTP basic auth
 - `api`: tiny Python API, listens on `9001`
 - `beads-dolt`: shared Beads Dolt backend kept for compatibility access, listens on `3306` internally and binds `127.0.0.1:3307` on the host
 - `beads-ui`: Beads UI kept for compatibility access, installed from `npm` in a local image, listens on `8080` internally and is proxied via `web`
@@ -43,17 +43,17 @@ The contract is:
 
 - there is exactly one compose file: `docker-compose.yml`
 - service names stay `web`, `api`, `db`, `redis`, `beads-dolt`, `beads-ui`, `task-tracker-db`, and `task-tracker`
-- `web` is the only public ingress-facing service
-- `api`, `beads-ui`, `db`, `redis`, `task-tracker-db`, and `task-tracker` stay internal-only from ingress
+- `web` is the only public ingress-facing service and binds `8081:8081` on the host
+- `api`, `beads-ui`, `db`, `redis`, `task-tracker-db`, and `task-tracker` stay internal-only behind `web`
 - `beads-dolt` binds loopback-only on the host for agent access (`127.0.0.1:3307`)
 - `task-tracker-db` binds loopback-only on the host for local SQL access (`127.0.0.1:55432`)
 - `task-tracker` binds loopback-only on the host for local health/API access (`127.0.0.1:9102`)
-- `web` keeps the external network alias `demo-agentforge-web`
+- `web` keeps HTTP basic auth enabled in `nginx/default.conf` with credentials from `nginx/demo-auth.htpasswd`
 - `beads-ui` bind-mounts the project checkout so it shares the repository fingerprint with host-side agent checkouts
 - `beads-ui` is built from `beads-ui/Dockerfile` and installs `beads-ui` via `npm`
 - internal ports stay offset from defaults: `8081`, `9001`, `3306`, `8080`, `5433`, `6380`, `5432`, `9102`
 
-This is what keeps the main AgentForge compose unchanged while the demo evolves.
+This keeps the demo runtime self-sufficient and predictable across hosts.
 
 ## Frontend Files
 
@@ -65,28 +65,20 @@ The frontend layout is fixed:
 
 New frontend assets should be added under `site/assets/` so the `web` config does not need structural changes.
 
-## Shared Host Deployment
+## Standalone Host Deployment
 
-AgentForge and the demo run as two separate compose projects:
+The demo now runs as one independent compose project on its host:
 
-- AgentForge owns the public ingress and the `agentforge.redmadrobot.com` domain
-- the demo owns its own runtime
-- both projects join the shared external Docker network `agentforge-edge`
+- no shared Docker network is required,
+- no upstream AgentForge ingress is required,
+- `web` is directly published on host port `8081`,
+- all public routes remain served by the local `web` container.
 
-The main AgentForge ingress routes:
-
-- `agentforge.redmadrobot.com` -> AgentForge API
-- `demo.agentforge.redmadrobot.com` -> `demo-agentforge-web:8081`
-
-Inside the demo stack, `web` additionally routes:
+Inside the demo stack, `web` routes:
 
 - `/dev/tasks` -> `task-tracker:9102`
 - `/dev/beads` -> `beads-ui:8080`
 - `/dev/beads/ws` -> `beads-ui:8080/ws` for Beads UI websocket traffic
-
-The main AgentForge stack only needs that one stable upstream.
-
-As long as the demo keeps the alias `demo-agentforge-web` and keeps `web` on `8081`, the AgentForge compose and ingress config do not need to change.
 
 The public demo domain is protected with HTTP basic auth:
 
@@ -118,7 +110,7 @@ The demo now exposes stable verification entrypoints in its local `Makefile`:
 - `make verify-ci`: CI-grade alias with the same blocking semantics,
 - `make lint-static`: syntax and required-file checks for the Python API and static assets,
 - `make lint-hygiene`: blocks placeholder markers and unfinished notes,
-- `make lint-contract`: enforces the fixed runtime contract (service names, stable alias, internal ports, and synchronized version beacons),
+- `make lint-contract`: enforces the fixed runtime contract (service names, standalone ingress/auth, internal ports, and synchronized version beacons),
 - `make test-unit`: runs focused stdlib unit tests for `api/server.py` helpers.
 
 A failing applicable check blocks merge. Review output does not replace green verification.
@@ -127,19 +119,13 @@ A failing applicable check blocks merge. Review output does not replace green ve
 
 The sections above are the authoritative architecture contract for the embedded demo while it still lives inside the main AgentForge repository.
 
-- Any change to the fixed compose contract, shared ingress alias, or task-tracking workflow contract must update this `README.md`, `AGENTS.md`, and the relevant `task-tracker` docs in the same change set.
+- Any change to the fixed compose contract, standalone ingress/auth contract, or task-tracking workflow contract must update this `README.md`, `AGENTS.md`, and the relevant `task-tracker` docs in the same change set.
 - Changes that revise a long-lived boundary or invariant should also update the parent repository architecture records (`docs/ARCHITECTURE.md`, `docs/adr/`, or `docs/agent_decisions.md`) before merge.
 - Deferred follow-up work is not an acceptable substitute for a failed blocking verification step.
 
 ## Deploy
 
-Create the shared network once:
-
-```bash
-docker network create agentforge-edge
-```
-
-Then deploy the demo independently:
+Deploy the demo independently:
 
 ```bash
 cd demo-agentforge
@@ -148,7 +134,7 @@ docker compose run --rm task-tracker python /app/migrate.py
 docker compose up -d --no-deps --force-recreate task-tracker web
 ```
 
-The first start now also builds the local `beads-ui` and `task-tracker` images, creates `./.beads-host/dolt` for the shared Beads backend, and initializes task-tracker schema via `python /app/migrate.py` in the `task-tracker` container.
+The first start builds local `beads-ui` and `task-tracker` images, creates `./.beads-host/dolt` for the shared Beads backend, and initializes task-tracker schema via `python /app/migrate.py` in the `task-tracker` container.
 Task Tracker setup and operations are documented in `task-tracker/README.md`.
 Remote access to the Beads backend still uses an SSH tunnel to `127.0.0.1:3307`.
 
@@ -176,14 +162,7 @@ Optional:
 
 - `DEMO_DEPLOY_PORT` (defaults to `22`)
 
-When this demo is moved into its own public repository, its CI/CD can deploy it without knowing internal AgentForge details.
-
-The only shared infrastructure contract is:
-
-- the host already has a Docker network named `agentforge-edge`
-- the main ingress already proxies the demo domain to `demo-agentforge-web:8081`
-
-That means demo CI/CD may safely run:
+The deployment pipeline is self-contained and may safely run:
 
 ```bash
 docker compose up --build -d
@@ -191,14 +170,8 @@ docker compose run --rm task-tracker python /app/migrate.py
 docker compose up -d --no-deps --force-recreate task-tracker web
 ```
 
-The demo pipeline does not need to know:
-
-- how AgentForge is built
-- which services AgentForge runs
-- what database AgentForge uses
-- which internal ports AgentForge uses
-
-It only needs to preserve the fixed compose contract above.
+The target host only needs Docker/Compose and network access to pull images/build.
+If public internet access is required, expose host port `8081` (or put any external reverse proxy/LB in front of `:8081`).
 
 ## Version Updates
 

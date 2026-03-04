@@ -20,6 +20,7 @@ for rel_path in (
     "tests/test_api_server.py",
     "tests/test_task_tracker_server.py",
     "tests/test_task_tracker_runtime_api.py",
+    "tests/test_standalone_runtime_contract.py",
 ):
     path = Path(rel_path)
     if not path.is_file():
@@ -36,6 +37,7 @@ for rel_path in (
     "site/version.json",
     "docker-compose.yml",
     "nginx/default.conf",
+    "nginx/demo-auth.htpasswd",
     "AGENTS.md",
     "README.md",
     "Makefile",
@@ -144,17 +146,22 @@ for marker in (
     "\n  beads-ui:\n",
     "\n  task-tracker-db:\n",
     "\n  task-tracker:\n",
-    'demo-agentforge-web',
     '"8081"',
+    "8081:8081",
     '"9001"',
     '"5433"',
     '"6380"',
     '"9102"',
     "127.0.0.1:55432:5432",
     "127.0.0.1:9102:9102",
+    "./nginx/demo-auth.htpasswd:/etc/nginx/conf.d/demo-auth.htpasswd:ro",
 ):
     if marker not in compose_text:
         raise SystemExit(f"docker-compose.yml missing contract marker: {marker}")
+
+for forbidden in ("agentforge-edge", "demo-agentforge-web", "external: true"):
+    if forbidden in compose_text:
+        raise SystemExit(f"docker-compose.yml contains deprecated shared-host marker: {forbidden}")
 
 for marker in (
     "location /api/",
@@ -166,6 +173,8 @@ for marker in (
     "location = /dev/beads/ws",
     "location /dev/beads/",
     "beads-ui:8080",
+    'auth_basic "demo-agentforge";',
+    "auth_basic_user_file /etc/nginx/conf.d/demo-auth.htpasswd;",
     "location / {",
     "try_files $uri $uri/ /index.html;",
 ):
@@ -188,6 +197,7 @@ for marker in (
     "## Stack",
     "## Task Tracking Workflow",
     "## Fixed Compose Contract",
+    "## Standalone Host Deployment",
     "`/dev/tasks` -> `task-tracker:9102`",
     "`/dev/beads` -> `beads-ui:8080`",
     "## Local Delivery Workflow",

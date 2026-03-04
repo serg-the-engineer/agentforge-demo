@@ -14,7 +14,7 @@
 ## Architecture and Change Control
 
 - `README.md` is the authoritative runtime contract for the demo stack. Keep compose, ingress, and task-tracking sections synchronized with real behavior.
-- The fixed compose contract is a blocking architecture boundary: service names, internal ports, loopback-only tracker/beads ports, and the `demo-agentforge-web` alias do not change casually.
+- The fixed compose contract is a blocking architecture boundary: service names, internal ports, loopback-only tracker/beads ports, the direct host publish for `web` (`8081:8081`), and nginx basic-auth protection do not change casually.
 - Keep `beads-ui` and `beads-dolt` runtime access available, but track active delivery through task-tracker.
 - Keep ingress mapping stable: `/dev/tasks` is task-tracker and `/dev/beads` is beads-ui.
 - Treat changes to workflow order, approval semantics, ingress shape, or long-lived runtime boundaries as architectural changes, not incidental edits.
