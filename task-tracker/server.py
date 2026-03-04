@@ -14,6 +14,9 @@ TASK_TRACKER_DATABASE_URL = os.environ.get(
     "TASK_TRACKER_DATABASE_URL",
     "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
 )
+TASK_TRACKER_UI_PROJECT_KEY = (
+    os.environ.get("TASK_TRACKER_UI_PROJECT_KEY", "demo").strip() or "demo"
+)
 
 ALLOWED_STATUSES = {"backlog", "ready", "in_progress", "done"}
 ALLOWED_TRANSITIONS = {
@@ -290,9 +293,7 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
       <section class="header">
         <h1>Task Tracker Operational UI</h1>
         <div class="toolbar">
-          <label for="tt-project-key">Project key</label>
-          <input id="tt-project-key" type="text" placeholder="project-a">
-          <button id="tt-connect" class="btn-primary" type="button">Connect</button>
+          <span id="tt-project-label" class="chip">Project: <span id="tt-project-value"></span></span>
           <button id="tt-refresh" class="btn-secondary" type="button">Refresh</button>
         </div>
         <div class="status-line">
@@ -336,7 +337,7 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
       ];
 
       const state = {
-        projectKey: "",
+        projectKey: DEFAULT_PROJECT_KEY || "",
         cursor: 0,
         selectedTaskId: null,
         snapshot: {
@@ -734,15 +735,22 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         void pollLoop(pollToken);
       }
 
-      async function connect() {
-        const projectKey = valueOf("tt-project-key");
-        if (!projectKey) {
-          setStatus("project key is required", "error");
+      function renderProjectLabel() {
+        const projectValue = byId("tt-project-value");
+        if (!projectValue) {
           return;
         }
+        projectValue.textContent = state.projectKey || "n/a";
+      }
 
-        state.projectKey = projectKey;
-        byId("tt-project-key").value = projectKey;
+      async function initializeConnection() {
+        if (!state.projectKey) {
+          setConnectionState("idle");
+          setStatus("project key is not configured", "error");
+          renderBoard();
+          renderDetails();
+          return;
+        }
         try {
           await refreshSnapshot(false);
           restartPolling();
@@ -764,7 +772,7 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
 
       async function handleDetailsAction(action, button) {
         if (!state.projectKey) {
-          throw new Error("connect to a project first");
+          throw new Error("project key is not configured");
         }
 
         if (action === "approve-transition") {
@@ -886,25 +894,16 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         });
       });
 
-      byId("tt-connect").addEventListener("click", () => {
-        void connect();
-      });
-
       byId("tt-refresh").addEventListener("click", () => {
         if (!state.projectKey) {
-          setStatus("connect to a project first", "error");
+          setStatus("project key is not configured", "error");
           return;
         }
         void refreshSnapshot(false);
       });
 
-      byId("tt-project-key").value = DEFAULT_PROJECT_KEY || "";
-      if (DEFAULT_PROJECT_KEY) {
-        void connect();
-      } else {
-        renderBoard();
-        renderDetails();
-      }
+      renderProjectLabel();
+      void initializeConnection();
     </script>
   </body>
 </html>
@@ -2536,7 +2535,9 @@ def route_operational_ui(path):
         return None
 
     query = parse_qs(parsed.query, keep_blank_values=True)
-    project_key = query.get("project_key", [""])[0]
+    project_key = query.get("project_key", [TASK_TRACKER_UI_PROJECT_KEY])[0]
+    if not isinstance(project_key, str) or not project_key.strip():
+        project_key = TASK_TRACKER_UI_PROJECT_KEY
     return HTTPStatus.OK, render_operational_ui_html(project_key)
 
 

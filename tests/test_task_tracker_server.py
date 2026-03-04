@@ -52,6 +52,9 @@ class TaskTrackerServerTests(unittest.TestCase):
         self.assertIn('data-action="open-blocked"', html)
         self.assertIn('data-action="open-awaiting-input"', html)
         self.assertIn('const DEFAULT_PROJECT_KEY = "project-ui";', html)
+        self.assertNotIn('id="tt-project-key"', html)
+        self.assertNotIn('id="tt-connect"', html)
+        self.assertIn('id="tt-project-label"', html)
 
 
 if __name__ == "__main__":

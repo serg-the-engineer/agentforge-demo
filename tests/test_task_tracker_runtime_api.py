@@ -1342,14 +1342,16 @@ class TaskTrackerRuntimeHttpApiTests(unittest.TestCase):
     def test_http_operational_ui_page_served(self):
         status, content_type, body = self._request_raw(
             "GET",
-            "/ui?project_key=project-http",
+            "/ui",
         )
 
         self.assertEqual(HTTPStatus.OK, status)
         self.assertIn("text/html", content_type)
         self.assertIn('id="tt-board"', body)
         self.assertIn('id="tt-details"', body)
-        self.assertIn('const DEFAULT_PROJECT_KEY = "project-http";', body)
+        self.assertIn('const DEFAULT_PROJECT_KEY = "demo";', body)
+        self.assertNotIn('id="tt-project-key"', body)
+        self.assertNotIn('id="tt-connect"', body)
 
 
 if __name__ == "__main__":
