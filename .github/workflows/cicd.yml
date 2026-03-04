@@ -78,6 +78,11 @@ jobs:
           ssh -p "${DEPLOY_PORT:-22}" -i "$HOME/.ssh/id_ed25519" "${DEPLOY_USER}@${DEPLOY_HOST}" <<'EOF'
           set -eu
           cd /srv/agentforge-demo
+          if [ -d .git ]; then
+            git fetch origin main
+            git pull --rebase origin main
+          fi
+          docker compose build --pull
           docker compose up --build -d
           docker compose run --rm task-tracker python /app/migrate.py
           docker compose up -d --no-deps --force-recreate task-tracker web

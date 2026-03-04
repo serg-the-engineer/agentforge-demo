@@ -105,7 +105,7 @@ Delivered behavior:
 
 - renders queue board buckets from snapshot projection,
 - renders task details panel with live context for selected task,
-- allows manual task creation from toolbar controls (title required, description/priority optional),
+- allows manual task creation from a dedicated form (title required, description/priority optional),
 - allows human approve/reject for pending transition attempts,
 - allows open/answer/resume for `blocked` and `awaiting_input` pause flows,
 - subscribes to event deltas via long polling updates endpoint and refreshes snapshot on change.

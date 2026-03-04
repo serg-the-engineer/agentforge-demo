@@ -81,22 +81,36 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         display: grid;
         gap: 10px;
       }
+      .header-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .header-left {
+        display: grid;
+        gap: 8px;
+      }
+      .header-right {
+        display: grid;
+        gap: 8px;
+        justify-items: end;
+      }
+      .header-right .status-line {
+        justify-content: flex-end;
+      }
+      .header-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
       .header h1 {
         margin: 0;
         font-size: 24px;
         letter-spacing: 0.01em;
       }
-      .toolbar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        align-items: center;
-      }
-      .toolbar label {
-        font-size: 13px;
-        font-weight: 600;
-      }
-      .toolbar input, .toolbar button, .details input, .details textarea, .details select {
+      .header-actions button, .create-form input, .create-form button, .details input, .details textarea, .details select {
         border-radius: 10px;
         border: 1px solid rgba(33, 51, 73, 0.24);
         font-size: 14px;
@@ -104,10 +118,16 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         background: #fff;
         color: var(--text);
       }
-      .toolbar input {
-        min-width: 220px;
+      .create-panel {
+        margin-top: 14px;
       }
-      .toolbar input.compact {
+      .create-form {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1.2fr) 150px auto;
+        gap: 10px;
+        align-items: center;
+      }
+      .create-form input.compact {
         min-width: 140px;
         width: 140px;
       }
@@ -281,6 +301,22 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         resize: vertical;
       }
       @media (max-width: 1020px) {
+        .header-top {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .header-right {
+          justify-items: start;
+        }
+        .header-right .status-line, .header-actions {
+          justify-content: flex-start;
+        }
+        .create-form {
+          grid-template-columns: 1fr;
+        }
+        .create-form input.compact {
+          width: 100%;
+        }
         .grid {
           grid-template-columns: 1fr;
         }
@@ -295,28 +331,44 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
   <body>
     <main class="wrap">
       <section class="header">
-        <h1>Task Tracker Operational UI</h1>
-        <div class="toolbar">
-          <span id="tt-project-label" class="chip">Project: <span id="tt-project-value"></span></span>
-          <button id="tt-refresh" class="btn-secondary" type="button">Refresh</button>
-          <label for="tt-create-title">New task</label>
-          <input id="tt-create-title" type="text" placeholder="task title">
-          <input id="tt-create-description" type="text" placeholder="description (optional)">
-          <input
-            id="tt-create-priority"
-            class="compact"
-            type="number"
-            min="0"
-            max="100"
-            placeholder="priority"
-          >
-          <button id="tt-create-task" class="btn-primary" type="button" data-action="create-task">
-            Add task
-          </button>
+        <div class="header-top">
+          <div class="header-left">
+            <h1>Task Tracker Operational UI</h1>
+            <span id="tt-project-label" class="chip">Project: <span id="tt-project-value"></span></span>
+          </div>
+          <div id="tt-header-right" class="header-right">
+            <div class="status-line">
+              <span id="tt-connection-state" class="chip">idle</span>
+              <span id="tt-status-text" class="chip">Ready</span>
+            </div>
+            <div id="tt-header-actions" class="header-actions">
+              <button id="tt-refresh" class="btn-secondary" type="button">Refresh</button>
+            </div>
+          </div>
         </div>
-        <div class="status-line">
-          <span id="tt-connection-state" class="chip">idle</span>
-          <span id="tt-status-text" class="chip">Ready</span>
+      </section>
+
+      <section class="panel create-panel">
+        <div class="panel-head">
+          <h2>New Task</h2>
+          <small>Manual creation form</small>
+        </div>
+        <div class="panel-body">
+          <form id="tt-create-form" class="create-form">
+            <input id="tt-create-title" type="text" placeholder="task title">
+            <input id="tt-create-description" type="text" placeholder="description (optional)">
+            <input
+              id="tt-create-priority"
+              class="compact"
+              type="number"
+              min="0"
+              max="100"
+              placeholder="priority"
+            >
+            <button id="tt-create-task" class="btn-primary" type="submit" data-action="create-task">
+              Add task
+            </button>
+          </form>
         </div>
       </section>
 
@@ -788,7 +840,7 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         }
       }
 
-      async function createTaskFromToolbar() {
+      async function createTaskFromForm() {
         if (!state.projectKey) {
           throw new Error("project key is not configured");
         }
@@ -943,9 +995,10 @@ OPERATIONAL_UI_HTML_TEMPLATE = """<!doctype html>
         });
       });
 
-      byId("tt-create-task").addEventListener("click", () => {
+      byId("tt-create-form").addEventListener("submit", (event) => {
+        event.preventDefault();
         void runAction("Task created", async () => {
-          await createTaskFromToolbar();
+          await createTaskFromForm();
         });
       });
 
